@@ -21,13 +21,12 @@ logging.basicConfig(
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
 )
 
-logger = logging.getLogger("main_window")
-
+root_logger = logging.getLogger()
 base_folder = Path(r"F:\01_FLUENT_SIM")
 folders_regex = r"(^D4P\d+\w.+|SVILSIM)(-|_)\w+"
 
 class TkinterTextHandler(logging.Handler):
-    """Custom handler che scrive i log nello ScrolledText."""
+    """Custom handler which writes log messages to GUI textbox."""
     
     def __init__(self, text_widget: scrolledtext.ScrolledText):
         super().__init__()
@@ -35,7 +34,6 @@ class TkinterTextHandler(logging.Handler):
 
     def emit(self, record):
         msg = self.format(record)
-        # Tkinter NON è thread-safe → usa .after()
         self.text_widget.after(0, self._write, msg)
 
     def _write(self, msg):
@@ -116,6 +114,7 @@ class MasterWindow(ttk.Frame):
         """
         Generate the commission class for the simulation and check if all the necessary files are present inside the folders.
         """
+        
         self.commissions_list = [CommissionParameters(name=commission_name, root_path=base_folder) for commission_name in self.commissions_name_list]
         files_not_found_list = [str(e) for commission in self.commissions_list for e in commission.missing_files] # Doppia list comprehesion perchè *lista non funziona
         if len(files_not_found_list)>0:
@@ -194,49 +193,48 @@ class MasterWindow(ttk.Frame):
         self.start_simulation_button.config(state=tk.DISABLED)
         self.progress["value"] = 0
         self.top_label.config(text="Running...")
-                
+
         self.log_area = scrolledtext.ScrolledText(self.root, wrap = tk.WORD)
         self.log_area.pack(padx=10, pady=y_padding)
         
-        # Avvia il thread della simulazione
+        # Run simulation thread
         thread = threading.Thread(target=self.start_simulation_thread, args=(cores,), daemon=True)
         thread.start()
-
-        # Avvia il controllo delle code per aggiornare la GUIÄ
+        
+        # Check queue to update GUI
         self.check_queue()
     
     def start_simulation_thread(self, cores):
-        i=0 #contatore delle simulazioni
+        i=0 #simulation counter
         for commission in self.commissions_list:
-            
             log_handler = TkinterTextHandler(self.log_area)
             log_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
-            logger.addHandler(log_handler)
-                
+            root_logger.addHandler(log_handler)
+        
             def calc_end(session, event_info):
                 self.callback = SolverEvent.CALCULATIONS_ENDED
             for case in commission.case_parameters_dict.values():
                 fluent_solver = FluentSolver.start_fluent(case=case, cores=cores)
                 fluent_solver.load_cas()
-                # fluent_solver.solver.events.register_callback(SolverEvent.CALCULATIONS_ENDED, calc_end)
+                fluent_solver.solver.events.register_callback(SolverEvent.CALCULATIONS_ENDED, calc_end)
                 self.stop_iteration_button.configure(state=tk.ACTIVE, command=lambda: self.stop_fluent_simulation(fluent_solver.solver))
                 for subcase in case.subcases_to_simulate:
                     self.callback = None
                     subcase_solver = fluent_solver.solve_subcase(subcase)
                     #contatore delle simulazioni e update del progress bar
                     i=i+1
-                    self.queue_results.put([i*self.progress_bar_step, f"{subcase} finished.\nStarted at: {subcase_solver.start_time}\tEnd time: {subcase_solver.end_time}\nTotal time: {subcase_solver.simulation_time}"])
+                    self.queue_results.put([i*self.progress_bar_step, f"{subcase._commissioncasesubcase_name} finished.\nStarted at: {subcase_solver.start_time}\tEnd time: {subcase_solver.end_time}\nTotal time: {subcase_solver.simulation_time}"])
                     
             fluent_solver.quit_fluent()
         self.queue_results.put(QueueEvents.CALC_DONE)  # Segnale di completamento
         
     def check_queue(self):
-        """Controlla la coda e aggiorna la GUI se ci sono nuovi dati."""
+        """Checks queue and updates GUI"""
         try:
             while not self.queue_results.empty():
                 q_results = self.queue_results.get_nowait()
                 if q_results == QueueEvents.CALC_DONE:
-                    self.top_label.config(text="Operazione completata!")
+                    self.top_label.config(text="Simulations completed!")
                     self.check_files_button.config(state=tk.NORMAL)
                     return
                 else:

@@ -16,7 +16,7 @@ from numpy import ceil
 
 logger = logging.getLogger(__name__)
 fluent_killer_path: Path =  Path(r"F:\01_FLUENT_SIM\UTILITIES_FLUENT\fluent_killer.bat")
-    
+
 @dataclass
 class FluentSolver:
     def __init__(self, solver_instance : Solver, case: CaseParameters, cores:int=4):
