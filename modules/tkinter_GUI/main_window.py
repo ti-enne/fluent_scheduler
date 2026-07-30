@@ -217,7 +217,7 @@ class MasterWindow(ttk.Frame):
                 fluent_solver = FluentSolver.start_fluent(case=case, cores=cores)
                 fluent_solver.load_cas()
                 fluent_solver.solver.events.register_callback(SolverEvent.CALCULATIONS_ENDED, calc_end)
-                self.stop_iteration_button.configure(state=tk.ACTIVE, command=lambda: self.stop_fluent_simulation(fluent_solver.solver))
+                self.after(0, lambda: self.stop_iteration_button.configure(state=tk.ACTIVE, command=lambda: self.stop_fluent_simulation(fluent_solver.solver)))
                 for subcase in case.subcases_to_simulate:
                     self.callback = None
                     subcase_solver = fluent_solver.solve_subcase(subcase)
@@ -225,7 +225,7 @@ class MasterWindow(ttk.Frame):
                     i=i+1
                     self.queue_results.put([i*self.progress_bar_step, f"{subcase._commissioncasesubcase_name} finished.\nStarted at: {subcase_solver.start_time}\tEnd time: {subcase_solver.end_time}\nTotal time: {subcase_solver.simulation_time}"])
                     
-            fluent_solver.quit_fluent()
+                fluent_solver.quit_fluent()
         self.queue_results.put(QueueEvents.CALC_DONE)  # Segnale di completamento
         
     def check_queue(self):
