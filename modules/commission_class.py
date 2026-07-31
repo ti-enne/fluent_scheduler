@@ -6,7 +6,7 @@ import pandas as pd
 from functools import cached_property
 import shutil
 from dataclasses import dataclass
-from modules.postprocessing_library import OutFileElaborated, LogFileElaborated
+from .postprocessing_library import OutFileElaborated, LogFileElaborated
 
 logger = logging.getLogger("commission_class")
 
@@ -148,7 +148,7 @@ class FluentSubcase:
             new_file_path = new_path / file.name
             shutil.copy2(file, new_file_path)
         
-        new_run = FluentRun(run_path=new_path, parent_subcase=self, research_path=new_path)
+        new_run = FluentRun(run_path=new_path, parent_subcase=self)
         self.runs_list.append(new_run)
         new_run.generate_plot_imgs()
         return new_run
@@ -188,15 +188,15 @@ class FluentSubcase:
         return filter_for_most_recent_file(lista)
 
 class FluentRun:
-    def __init__(self, run_path:Path, parent_subcase:FluentSubcase, research_path:Path):
+    def __init__(self, run_path:Path, parent_subcase:FluentSubcase):
         self.path = run_path
         self.parent_subcase = parent_subcase
         self.parent_case = parent_subcase.parent_case
         self.parent_commission = self.parent_case.parent_commission
         self.index = self._build_run_number()
         self.name = self._build_run_name()
-        self.out_files_list = self._build_out_files_list(research_path=research_path)
-        self.log_file = self._build_log_file(research_path=research_path)
+        self.out_files_dict = self._build_out_files_dict(research_path=self.path)
+        self.log_file = self._build_log_file(research_path=self.path)
     
     @cached_property
     def _commissioncasesubcase_name(self):
@@ -222,12 +222,13 @@ class FluentRun:
             logger.error(f"No run folders for {self._commissioncasesubcase_name}")
             return
     
-    def _build_out_files_list(self, research_path:Path=None) -> list[OutFileElaborated]:
-        out_files_list = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=[".out"])
-        if not out_files_list:
+    def _build_out_files_dict(self, research_path:Path=None) -> dict[str,OutFileElaborated]:
+        out_files_dict = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=[".out"])
+        if not out_files_dict:
             return []
-        out_files_list: list[OutFileElaborated] = [OutFileElaborated(item) for item in out_files_list]
-        return out_files_list
+        out_files_dict = [OutFileElaborated(item) for item in out_files_dict]
+        out_files_dict = {item.name : item for item in out_files_dict}
+        return out_files_dict
     
     def _build_log_file(self, research_path:Path=None) -> LogFileElaborated:
         log_file = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=["log.txt"])
@@ -237,9 +238,9 @@ class FluentRun:
         return log_file
     
     def out_files_plotter(self):
-        if not self.out_files_list:
+        if not self.out_files_dict:
             return
-        for output_file in self.out_files_list:
+        for output_file in self.out_files_dict:
             fig_name = f"{self._casesubcase_name}_{output_file.name}.jpeg"
             fig_path = self.path / fig_name
             fig, ax = plt.subplots()
