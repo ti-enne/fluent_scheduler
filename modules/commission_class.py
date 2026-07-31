@@ -148,9 +148,9 @@ class FluentSubcase:
             new_file_path = new_path / file.name
             shutil.copy2(file, new_file_path)
         
-        new_run = FluentRun(run_path=new_path, parent_subcase=self)
+        new_run = FluentRun(run_path=new_path, parent_subcase=self, research_path=new_path)
         self.runs_list.append(new_run)
-        new_run.generate_plot_imgs(research_path=new_path)
+        new_run.generate_plot_imgs()
         return new_run
 
     def _file_list_generator(self, research_path:Path, file_extension_list:list[str]) -> list[Path]:
@@ -188,13 +188,15 @@ class FluentSubcase:
         return filter_for_most_recent_file(lista)
 
 class FluentRun:
-    def __init__(self, run_path:Path, parent_subcase:FluentSubcase):
+    def __init__(self, run_path:Path, parent_subcase:FluentSubcase, research_path:Path):
         self.path = run_path
         self.parent_subcase = parent_subcase
         self.parent_case = parent_subcase.parent_case
         self.parent_commission = self.parent_case.parent_commission
         self.index = self._build_run_number()
         self.name = self._build_run_name()
+        self.out_files_list = self._build_out_files_list(research_path=research_path)
+        self.log_file = self._build_log_file(research_path=research_path)
     
     @cached_property
     def _commissioncasesubcase_name(self):
@@ -220,29 +222,43 @@ class FluentRun:
             logger.error(f"No run folders for {self._commissioncasesubcase_name}")
             return
     
-    def out_files_plotter(self, research_path:Path=None):
+    def _build_out_files_list(self, research_path:Path=None) -> list[OutFileElaborated]:
         out_files_list = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=[".out"])
+        if not out_files_list:
+            return []
         out_files_list: list[OutFileElaborated] = [OutFileElaborated(item) for item in out_files_list]
-        for output_file in out_files_list:
+        return out_files_list
+    
+    def _build_log_file(self, research_path:Path=None) -> LogFileElaborated:
+        log_file = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=["log.txt"])
+        if not log_file:
+            return None
+        log_file = LogFileElaborated(log_file[0])
+        return log_file
+    
+    def out_files_plotter(self):
+        if not self.out_files_list:
+            return
+        for output_file in self.out_files_list:
             fig_name = f"{self._casesubcase_name}_{output_file.name}.jpeg"
             fig_path = self.path / fig_name
             fig, ax = plt.subplots()
             output_file.generate_dataframe_ax(ax=ax)
             fig.savefig(fig_path, bbox_inches='tight')
             
-    def log_files_plotter(self, research_path:Path=None):
-        log_file = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=["log.txt"])
-        log_file = LogFileElaborated(log_file[0])
-        for df_name in log_file.dataframes_dict:
+    def log_files_plotter(self):
+        if self.log_file == None:
+            return
+        for df_name in self.log_file.dataframes_dict:
             fig,ax = plt.subplots()
-            log_file.df_to_ax(df_name, ax)
+            self.log_file.df_to_ax(df_name, ax)
             fig_name = f"{self._casesubcase_name}_{df_name.lower()}.jpeg"
             fig_path = self.path / fig_name
             fig.savefig(fig_path, bbox_inches='tight')
     
-    def generate_plot_imgs(self, research_path:Path=None):
-        self.out_files_plotter(research_path)
-        self.log_files_plotter(research_path)
+    def generate_plot_imgs(self):
+        self.out_files_plotter()
+        self.log_files_plotter()
 
 
 if __name__=="__main__":
