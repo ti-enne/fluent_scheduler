@@ -240,7 +240,7 @@ class FluentRun:
     def out_files_plotter(self):
         if not self.out_files_dict:
             return
-        for output_file in self.out_files_dict:
+        for output_file in self.out_files_dict.values():
             fig_name = f"{self._casesubcase_name}_{output_file.name}.jpeg"
             fig_path = self.path / fig_name
             fig, ax = plt.subplots()
