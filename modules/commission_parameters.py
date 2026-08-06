@@ -92,7 +92,7 @@ class CaseParameters(FluentCase):
             self.skip_case = True
             logger.info(f"No subcase to be run for {self.parent_commission} -> {self.name}. Setting skip_case to True")
         self.subcases_to_simulate = [subcase for subcase in self.subcases_parameters.values() if subcase.skip_subcase==False]
-        self.subcases_to_initialize = [subcase for subcase in self.subcases_parameters.values() if subcase.initialize==True]
+        self.subcases_to_initialize = [subcase for subcase in self.subcases_to_simulate if subcase.initialize==True]
         self.subcases_to_simulate_only = [subcase for subcase in self.subcases_to_simulate if subcase not in self.subcases_to_initialize]
         self.subcases_to_skip = [subcase for subcase in self.subcases_parameters.values() if subcase.skip_subcase==True]
     
