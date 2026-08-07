@@ -72,7 +72,8 @@ class FluentSolver:
         self.solver.exit()
         
     def load_cas(self) -> FluentSolverFlags:
-        logger.info(f"====================================================\nLoading case {self.case.parent_commission.name} -> {self.case.name}")
+        logger.info("="*80, extra={"plain":True})
+        logger.info(f"Loading case {self.case.parent_commission.name} -> {self.case.name}")
         self.solver.settings.file.read(file_type="case", file_name=self.case.cas_file_path)
         self.solver.tui.solve.set.expert("n", "n", "n")
         self.solver.settings.file.batch_options.confirm_overwrite = False #Enable auto-confirm on solver prompt
@@ -82,6 +83,7 @@ class FluentSolver:
     def solve_subcase(self, subcase:SubcaseParameters):
         subcase_solver = FluentSubcaseSolver(fluent_solver=self, subcase=subcase)
         subcase_solver.solve_subcase()
+        logger.info("-"*80, extra={"plain":True})
         return subcase_solver
     
     def solve_all_subcases(self):
@@ -113,7 +115,7 @@ class FluentSubcaseSolver:
         self._export_to_cfd_post()
 
     def _manage_convergence_conditions(self, active:bool=True)->None:
-        logger.info(f"Setting convergence conditions to active={active}")
+        logger.debug(f"Setting convergence conditions to active={active}")
         convergence_conditions = self.solver.settings.solution.monitor.convergence_conditions.convergence_reports
         if len(convergence_conditions())==0:
             return
@@ -157,11 +159,11 @@ class FluentSubcaseSolver:
         self._manage_UDS_equations()
         self._start_transcript()
         cbid = self._define_save_img_callback()
-        cbid = self._define_transcript_callback()
+        cbid = self._define_transcript_callback(max_film_time=5)
         self._manage_residuals()
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path) #To avoid auto-save writing .cas file.
-        self._solve_steady_state()
-        self._solve_transient()
+        self._solve_first_order()
+        self._solve_second_order()
         self._solve_UDS_equations()
         self.solver.settings.parallel.timer.usage()
         self.solver.settings.file.stop_transcript()
@@ -169,7 +171,7 @@ class FluentSubcaseSolver:
         self.end_time = datetime.datetime.now()       
         self.simulation_time = self.end_time - self.start_time
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path)
-        logger.info(f"---------------------\nEnd of simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}\nFinished at: {self.end_time.strftime(self.date_formatting)}\nSimulation duration: {self.simulation_time}\n---------------------\nInitiating postprocessing...")
+        logger.info(f"End of simulation:\nStarted at: {self.start_time.strftime(self.date_formatting)}\nFinished at: {self.end_time.strftime(self.date_formatting)}\nSimulation duration: {self.simulation_time}")
         self._post_simulation_subcase()
 
     def _manage_named_expressions(self):
@@ -235,19 +237,20 @@ class FluentSubcaseSolver:
         
         self.solver.settings.file.auto_save = auto_save_dict
     
-    def _manage_UDS_equations(self, active:bool=False)->list[str]:
+    def _manage_UDS_equations(self, active:bool=False):
         #Gestisco le equazioni delle UDS in modo che vengano risolte a posteriori.
         equations = self.solver.settings.solution.controls.equations
-        uds_equations = [item for item in equations().keys() if re.search(r"uds", item)]
-        if len(uds_equations)==0:
-            logger.info("No UDS to solve or manage")
+        if not hasattr(self, "_uds_equations"):
+            self._uds_equations = [item for item in equations().keys() if re.search(r"uds", item)]
+            if len(self._uds_equations)==0:
+                logger.info("No UDS to solve or manage")
+        if not self._uds_equations:
             return []
         for eq in equations:
-            if eq in uds_equations:
+            if eq in self._uds_equations:
                 equations[eq] = active
             else:
                 equations[eq] = not active
-        return uds_equations
     
     def _start_transcript(self):
         # Gestisco il file transcript prodotto
@@ -311,6 +314,7 @@ class FluentSubcaseSolver:
                 self.solver.execute_tui("(cx-interrupt)")
                 i = i + 1
         
+        max_film_time = max_film_time
         def on_transcript_message(msg:str):
             msg=msg.strip()
             self.transcript_list.append(msg)
@@ -386,107 +390,60 @@ class FluentSubcaseSolver:
                         "relative_criteria" : value[1],
                     }
 
-    def _solve_first_order_steady_state(self):
-        discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
+    def _solve_first_order(self):
         if not self.subcase.first_order_solve:
             return
-
-        logger.info("Solving first order simulation")
+        discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
         self.spatial_discretization = FluentSpatialSchemes.FIRST_ORDER_UW.value
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
-        self.solver.settings.solution.run_calculation.iter_count = self.subcase.first_order_iterations
-        self.solver.settings.solution.run_calculation.calculate()
-        logger.info("Finished steady-state first-order simulation")
-        dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}_1storder.dat.h5"
-        self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
-
-    def _solve_second_order_steady_state(self):
-        if self.time_discretization != FluentSolverFlags.STEADY:
-            return
-        discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
-        self.spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW.value
-        discretization_schemes["mom"] = self.spatial_discretization
-        self._manage_residuals()
-        #Risolvo senza convergence condition per tot iterazioni per evitare che vada subito a convergenza
-        try:
-            self.solver.settings.solution.run_calculation.pseudo_time_settings.time_step_method.time_step_size_scale_factor = self.subcase.time_step_size
-        except:
-            logger.info("Time step scale factor has NOT been set.")
-        second_order_no_convcond_iter = 100
-        if second_order_no_convcond_iter < self.subcase.second_order_iterations:
-            logger.info(f"Solving steady-state second-order with convergence conditions disabled.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
-            self._manage_convergence_conditions(active=False)
-            self.solver.settings.solution.run_calculation.iter_count = second_order_no_convcond_iter
-            try:
-                self.solver.settings.solution.run_calculation.calculate()
-            except RuntimeError as e:
-                logger.error("Second order calculations has encoutered an error. Stopping.")
-                pass
-            self.subcase.second_order_iterations = self.subcase.second_order_iterations - second_order_no_convcond_iter
-            self._manage_convergence_conditions(active=True)
-        self.solver.settings.solution.run_calculation.iter_count = self.subcase.second_order_iterations
-        logger.info(f"Solving steady-state second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
-        self.solver.settings.solution.run_calculation.calculate()
-        logger.info("Finished steady-state second-order simulation")
-        dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}.dat.h5"
-        self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
-
-    def _solve_steady_state(self):
-        if not self.time_discretization == FluentSolverFlags.STEADY:
-            return
-        self._solve_first_order_steady_state()
-        self._solve_second_order_steady_state()
-
-    def _solve_first_order_transient(self):
-        discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
-        if not self.subcase.first_order_solve:
-            return
-
-        logger.info("Solving first order simulation")
-        self.spatial_discretization = FluentSpatialSchemes.FIRST_ORDER_UW.value
-        discretization_schemes["mom"] = self.spatial_discretization
-        self._manage_residuals()
-        self.solver.settings.solution.run_calculation.transient_controls = {
-            'time_step_count': self.subcase.first_order_iterations,
-            'time_step_size': self.subcase.time_step_size,
-        }
-        logger.info(f"Solving transient first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
-        self.solver.settings.solution.run_calculation.calculate()
-        logger.info("Finished transient first-order simulation")
-        dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}_1storder.dat.h5"
-        self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
-
-    def _solve_second_order_transient(self):
-        discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
-        self.spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW.value
-        discretization_schemes["mom"] = self.spatial_discretization
-        self._manage_residuals()
-
-        # Cambio i parametri e lancio il calcolo transitorio
-        self._manage_convergence_conditions(active=False)
-        self.solver.settings.solution.run_calculation.transient_controls = {
-            'time_step_count': self.subcase.second_order_iterations,
-            'time_step_size': self.subcase.time_step_size,
-        }
-        logger.info(f"Solving transient second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
-        self.solver.settings.solution.run_calculation.calculate()
-        logger.info("Finished transient second-order simulation")
-        dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}.dat.h5"
-        self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
-
-    def _solve_transient(self):
         if self.time_discretization == FluentSolverFlags.STEADY:
+            self.solver.settings.solution.run_calculation.iter_count = self.subcase.first_order_iterations
+            logger.info(f"Solving steady-state first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
+        else:
+            self.solver.settings.solution.run_calculation.transient_controls = {
+                'time_step_count': self.subcase.first_order_iterations,
+                'time_step_size': self.subcase.time_step_size,
+            }
+            logger.info(f"Solving transient first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
+        self.solver.settings.solution.run_calculation.calculate()
+        logger.info(f"Finished {self.time_discretization.value} first-order simulation")
+        dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}_1storder.dat.h5"
+        self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
+        
+    def _solve_second_order(self):
+        if not self.subcase.second_order_solve:
             return
-        self._solve_first_order_transient()
-        self._solve_second_order_transient()
-    
+        discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
+        self.spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW.value
+        discretization_schemes["mom"] = self.spatial_discretization
+        self._manage_residuals()
+        if self.time_discretization == FluentSolverFlags.STEADY:
+            second_order_no_convcond_iter = 100
+            if second_order_no_convcond_iter < self.subcase.second_order_iterations:
+                logger.info(f"Solving steady-state second-order with convergence conditions disabled.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
+                self._manage_convergence_conditions(active=False)
+                self.solver.settings.solution.run_calculation.iter_count = second_order_no_convcond_iter
+                self.solver.settings.solution.run_calculation.calculate()
+                self.subcase.second_order_iterations = self.subcase.second_order_iterations - second_order_no_convcond_iter
+                logger.info(f"Solving steady-state second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
+                self._manage_convergence_conditions(active=True)
+        else:
+            self._manage_convergence_conditions(active=False)
+            self.solver.settings.solution.run_calculation.transient_controls = {
+                'time_step_count': self.subcase.second_order_iterations,
+                'time_step_size': self.subcase.time_step_size,
+            }
+            logger.info(f"Solving transient second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
+        self.solver.settings.solution.run_calculation.calculate()
+        logger.info(f"Finished {self.time_discretization.value} second-order simulation")
+        dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}.dat.h5"
+        self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
+
     def _solve_UDS_equations(self, iter:int=200):
-        uds_equations = self._manage_UDS_equations(active=True)
-        if len(uds_equations)==0:
-            logger.info("No UDS to solve or manage")
-            self._manage_UDS_equations(active=False)
-            return
+        if len(self._uds_equations)==0:
+            return []
+        self._manage_UDS_equations(active=True)
         discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
         uds_equation_names = [item for item in discretization_schemes() if item.startswith("uds")]
         for eq in uds_equation_names:
@@ -500,6 +457,7 @@ class FluentSubcaseSolver:
         logger.info("Finished UDS simulation")
             
     def _post_simulation_subcase(self):
+        logger.info("Initiating postprocessing...")
         #Creo il file che tiene traccia delle simulazioni effettuate nel caso non esista.
         analisi_folder_path = self.case.folder_path.parent
         log_file_path = analisi_folder_path / "simulation_log.txt"
@@ -521,6 +479,8 @@ class FluentSubcaseSolver:
                 f.write(f"{self.end_time}\t{self.commission.name}\t{self.subcase.casesubcase_name}\tdurata simulazione: {self.simulation_time}\tnumero di core: {self.fluent_solver.cores}\n")
         except Exception as e:
             logger.error(f"Log file could not be written or the subcase was not simulated. Error {e}")
+        logger.info("Postprocessing finished.")
+
 
     def _export_to_cfd_post(self):
         if not self.subcase.export_to_cfd_post:

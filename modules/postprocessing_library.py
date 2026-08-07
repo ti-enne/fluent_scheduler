@@ -10,6 +10,7 @@ logger = logging.getLogger("postprocessing_library")
 class OutFileElaborated:
     def __init__(self, path:Path):
         self.path = path
+        self.parent_name = self.path.parent.name
         file_lines = self._build_file_lines()
         self.name = file_lines[0].replace('"','').replace("\n","")
         self.dataframe = self._build_dataframe(file_lines)
@@ -93,8 +94,9 @@ class OutFileElaborated:
         return ax
 
 class LogFileElaborated:
-    def __init__(self, path):
+    def __init__(self, path:Path):
         self.path = path
+        self.parent_name = self.path.parent.name
         self.dataframes_dict : dict[str,pd.DataFrame] = {}
         full_file = self._build_full_file()
         file_lines = full_file.split("\n")
@@ -124,7 +126,7 @@ class LogFileElaborated:
     def _build_pseudo_dt_dataframe(self, file_lines:list[str]) -> pd.DataFrame|None:
         pseudo_dt_lines = [float(re.search(r"(?<=\s*Automatic.*=\s*)\d+\.\d+e(\+|\-)\d+", line).group()) for line in file_lines if bool(re.search(r"^\s*Automatic.*=\s*",line))]
         if not pseudo_dt_lines:
-            logger.info("No info about pseudo-dt available. Corresponding dataframe will not be created.")
+            logger.debug(f"No info about pseudo-dt available for {self.parent_name}. Corresponding dataframe will not be created.")
             return None
         pseudo_dt_df = pd.DataFrame(pseudo_dt_lines, columns=["Pseudo time-step [s]"])
         self.dataframes_dict["Pseudo_dt"] = pseudo_dt_df
@@ -134,7 +136,7 @@ class LogFileElaborated:
     def _build_radiosity_dataframe(self, full_file:str) -> pd.DataFrame|None:
         matched_text = re.findall(r"(^\s+\d+(.*\n){1,5}^Final radiosity.*$)", full_file, flags=re.MULTILINE) #estraggo tutte le linee che comprendono info sulla radiosity e relativo numero di iterazione
         if not matched_text:
-            logger.info("No info about radiosity available. Corresponding dataframe will not be created.")
+            logger.debug(f"No info about radiosity available for {self.parent_name}. Corresponding dataframe will not be created.")
             return None
         iteration_number_list = []
         radiosity_iterations_list = [] 

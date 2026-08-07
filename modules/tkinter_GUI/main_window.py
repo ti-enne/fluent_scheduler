@@ -16,6 +16,12 @@ from modules.commission_parameters import CommissionParameters
 from modules.tkinter_GUI.file_selector import FileSelectorGUI
 from modules.tkinter_GUI.simulation_queue_GUI import SimulationQueueGUI 
 
+class MyFormatter(logging.Formatter):
+    def format(self, record):
+        if getattr(record, "plain", False):
+            return record.getMessage()
+        return super().format(record)
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s | %(name)s | %(levelname)s | %(message)s",
@@ -208,7 +214,7 @@ class MasterWindow(ttk.Frame):
         i=0 #simulation counter
         for commission in self.commissions_list:
             log_handler = TkinterTextHandler(self.log_area)
-            log_handler.setFormatter(logging.Formatter("%(asctime)s - %(message)s"))
+            log_handler.setFormatter(MyFormatter("%(asctime)s - %(message)s"))
             root_logger.addHandler(log_handler)
         
             def calc_end(session, event_info):
@@ -252,7 +258,7 @@ class MasterWindow(ttk.Frame):
             self.root.after(1000, self.check_queue)
 
     def destroy_fluent(self):
-        fluent_killer_path = Path(r".\fluent_automation\fluent_killer.bat")
+        fluent_killer_path = Path(r".\fluent_killer.bat")
         subprocess.run(fluent_killer_path)
         # sys.exit(0)
     

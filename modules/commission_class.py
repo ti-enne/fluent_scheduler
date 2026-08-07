@@ -158,7 +158,6 @@ class FluentSubcase:
             shutil.copy2(file, new_file_path)
         
         new_run = FluentRun(run_path=new_path, parent_subcase=self)
-        self.runs_list.append(new_run)
         new_run.generate_plot_imgs()
         return new_run
 
