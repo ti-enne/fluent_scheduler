@@ -165,7 +165,7 @@ class FluentSubcaseSolver:
         self._solve_UDS_equations()
         self.solver.settings.parallel.timer.usage()
         self.solver.settings.file.stop_transcript()
-        self.solver.tui.file.write_settings(f".\\{self.case.name}_{self.subcase.name}.flsettings")
+        self.solver.tui.file.write_settings(f"{self.subcase.casesubcase_name}.flsettings")
         self.end_time = datetime.datetime.now()       
         self.simulation_time = self.end_time - self.start_time
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path)
@@ -425,7 +425,7 @@ class FluentSubcaseSolver:
                 pass
             self.subcase.second_order_iterations = self.subcase.second_order_iterations - second_order_no_convcond_iter
             self._manage_convergence_conditions(active=True)
-            self.solver.settings.solution.run_calculation.iter_count = self.subcase.second_order_iterations
+        self.solver.settings.solution.run_calculation.iter_count = self.subcase.second_order_iterations
         logger.info(f"Solving steady-state second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         self.solver.settings.solution.run_calculation.calculate()
         logger.info("Finished steady-state second-order simulation")
@@ -492,6 +492,8 @@ class FluentSubcaseSolver:
         for eq in uds_equation_names:
             discretization_schemes[eq] = FluentSpatialSchemes.SECOND_ORDER_UW.value
         logger.info("Solving UDS equations")
+        if iter > self.subcase.second_order_iterations:
+            iter = self.subcase.second_order_iterations
         self.solver.settings.solution.run_calculation.iter_count = iter
         self.solver.settings.solution.run_calculation.calculate()
         self._manage_UDS_equations(active=False)

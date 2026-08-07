@@ -213,7 +213,7 @@ class MasterWindow(ttk.Frame):
         
             def calc_end(session, event_info):
                 self.callback = SolverEvent.CALCULATIONS_ENDED
-            for case in commission.case_parameters_dict.values():
+            for case in commission.cases_to_simulate_list:
                 fluent_solver = FluentSolver.start_fluent(case=case, cores=cores)
                 fluent_solver.load_cas()
                 fluent_solver.solver.events.register_callback(SolverEvent.CALCULATIONS_ENDED, calc_end)

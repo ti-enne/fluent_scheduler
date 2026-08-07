@@ -99,33 +99,42 @@ class FluentSubcase:
     parent_case : FluentCase
     dat_path : Path
     name : str = None
-    runs_list : list["FluentRun"] = None
-    latest_run : "FluentRun" = None
     _commissioncasesubcase_name : str = None
     casesubcase_name : str = None
-       
+    
     def __post_init__(self):
         self.name = self._build_name()
         self.parent_commission = self.parent_case.parent_commission
         self._commissioncasesubcase_name = self._build_commissioncasesubcase_name()
         self.casesubcase_name = self._build_casesubcase_name()
-        self.runs_list, self.latest_run = self._build_run_folders()        
+    
+    @cached_property
+    def runs_list(self) -> list["FluentRun"]:
+        run_folder_list = self._get_run_folder_list()
+        runs_list = [FluentRun(run_path=path, parent_subcase=self) for path in run_folder_list]
+        return runs_list
+    
+    @cached_property
+    def latest_run(self) -> "FluentRun":
+        run_folder_list = self._get_run_folder_list()
+        if not run_folder_list:
+            return
+        self.latest_run = FluentRun(run_path=run_folder_list[-1], parent_subcase=self)
+        return self.latest_run
+    
+    def _get_run_folder_list(self) -> list[Path]:
+        run_folder_list = [item for item in self.parent_case.runs_archive_path.iterdir() if item.is_dir() and re.search(f"{self.parent_case.name}_{self.name}_run", item.name)]
+        if not run_folder_list:
+            logger.info(f"No runs available to be processed for {self._commissioncasesubcase_name}")
+            return []
+        run_folder_list.sort(key=lambda x: self._extract_run_value(x))
+        return run_folder_list
     
     def _build_commissioncasesubcase_name(self) -> str:
         return f"{self.parent_commission.name} -> {self.parent_case.name} -> {self.name}"
 
     def _build_casesubcase_name(self) -> str:
         return f"{self.parent_case.name}_{self.name}"
-
-    def _build_run_folders(self) -> tuple[list[Path], "FluentRun"]:
-        run_folder_list = [item for item in self.parent_case.runs_archive_path.iterdir() if item.is_dir() and re.search(f"{self.parent_case.name}_{self.name}_run", item.name)]
-        if not run_folder_list:
-            logger.info(f"No runs available to be processed for {self._commissioncasesubcase_name}")
-            return [], None
-        run_folder_list.sort(key=lambda x: self._extract_run_value(x))
-        runs_list = [FluentRun(run_path=path, parent_subcase=self) for path in run_folder_list]
-        latest_run = runs_list[-1]
-        return runs_list, latest_run
         
     def _build_name(self) -> str:
         name = remove_file_extension(self.dat_path.name)
@@ -189,6 +198,8 @@ class FluentSubcase:
 
 class FluentRun:
     def __init__(self, run_path:Path, parent_subcase:FluentSubcase):
+        if run_path==None:
+            return None
         self.path = run_path
         self.parent_subcase = parent_subcase
         self.parent_case = parent_subcase.parent_case
