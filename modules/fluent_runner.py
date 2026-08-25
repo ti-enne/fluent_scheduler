@@ -263,6 +263,7 @@ class FluentSubcaseSolver:
         self.solver.settings.file.start_transcript(file_name=transcript_file_path.absolute()) #Inizio a scrivere il file di transcript.
 
     def _define_save_img_callback(self) -> str:
+        self.solver.tui.display.set.rendering_options.driver("null") #to avoid crash when using RDP and the remote session is closed. To keep screenshots, use tsdiscon in cmd instead of closing the session
         every_n_iteration = self.subcase.save_img_every
         if every_n_iteration in [0,None]:
             return
@@ -286,9 +287,9 @@ class FluentSubcaseSolver:
             for contour_name in contour_list:
                 graphics.contour[contour_name].display()
                 for view_name in self.subcase.view_list:
+                    save_path = base_path / f"{contour_name}_{view_name}_iter{event_info.index}"
                     graphics.views.restore_view(view_name=view_name)
                     graphics.views.auto_scale()
-                    save_path = base_path / f"{contour_name}_{view_name}_iter{event_info.index}"
                     graphics.picture.save_picture(file_name=save_path.absolute())
 
         cbid = self.solver.events.register_callback(pyfluent.SolverEvent.ITERATION_ENDED, on_iteration_end)
@@ -435,6 +436,7 @@ class FluentSubcaseSolver:
                 'time_step_size': self.subcase.time_step_size,
             }
             logger.info(f"Solving transient second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
+        self.solver.settings.solution.run_calculation.iter_count = self.subcase.second_order_iterations
         self.solver.settings.solution.run_calculation.calculate()
         logger.info(f"Finished {self.time_discretization.value} second-order simulation")
         dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}.dat.h5"

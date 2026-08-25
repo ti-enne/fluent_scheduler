@@ -104,6 +104,20 @@ Potential extensions include:
 
 ---
 
+## Known limitation
+
+If Fluent is launched from a Windows Remote Desktop session,
+
+graphics-related callbacks (display, save_picture, etc.)
+
+may fail when the RDP session is disconnected.
+
+Workaround:
+
+Setting the display driver to "null" inside Fluent fixes the issue.  (/driver/set/rendering-options/driver)
+
+---
+
 ## Author
 
 Developed by **ti-enne**
@@ -117,3 +131,27 @@ https://github.com/ti-enne/fluent_scheduler
 ## Disclaimer
 
 This project is an unofficial automation tool for ANSYS Fluent and is not affiliated with Ansys Inc.
+
+Known limitation:
+
+If Fluent is launched from a Windows Remote Desktop session,
+
+graphics-related callbacks (display, save_picture, etc.)
+
+may fail when the RDP session is disconnected.
+
+Workaround:
+
+Launch Fluent from the local console session and only monitor it through RDP.
+
+Known limitation:
+
+If Fluent is launched from a Windows Remote Desktop session,
+
+graphics-related callbacks (display, save_picture, etc.)
+
+may fail when the RDP session is disconnected.
+
+Workaround:
+
+Launch Fluent from the local console session and only monitor it through RDP.
