@@ -13,11 +13,11 @@ import textwrap
 from modules.fluent_flags import FluentSolverFlags,FluentSpatialSchemes
 from threading import Event
 from numpy import ceil
+import pandas as pd
 
 logger = logging.getLogger(__name__)
 fluent_killer_path: Path =  Path(r"F:\01_FLUENT_SIM\UTILITIES_FLUENT\fluent_killer.bat")
 
-@dataclass
 class FluentSolver:
     def __init__(self, solver_instance : Solver, case: CaseParameters, cores:int=4):
         self.solver = solver_instance
@@ -158,8 +158,9 @@ class FluentSubcaseSolver:
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
+        self.transcript = TranscriptElaborator(solver=self.solver, max_film_time=5)
         cbid = self._define_save_img_callback()
-        cbid = self._define_transcript_callback(max_film_time=5)
+        cbid = self._define_transcript_callback()
         self._manage_residuals()
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path) #To avoid auto-save writing .cas file.
         self._solve_first_order()
@@ -295,52 +296,10 @@ class FluentSubcaseSolver:
         cbid = self.solver.events.register_callback(pyfluent.SolverEvent.ITERATION_ENDED, on_iteration_end)
         return cbid
         
-    def _define_transcript_callback(self, max_film_time=None) -> str:
-        self.transcript_list = []
-        calculation_ended_event = Event()
-        walls_BC = self.solver.settings.setup.boundary_conditions.wall
-        wall_BC_list = list(walls_BC().keys())
-        wall_film_model_active = False
-        if "wall_film" in walls_BC()[wall_BC_list[0]]:
-            # self.solver.tui.define.models.eulerian_wallfilm.initialize_wallfilm_model()
-            wall_film_model_active = True
-
-        def on_calculation_end(session, event_info:pyfluent.CalculationsEndedEventInfo):
-            calculation_ended_event.set()
-        
-        def stop_simulation():
-            i=0
-            while(i<10 and not calculation_ended_event.is_set()):
-                print(on_calculation_end)
-                self.solver.execute_tui("(cx-interrupt)")
-                i = i + 1
-        
-        max_film_time = max_film_time
+    def _define_transcript_callback(self) -> str:         
         def on_transcript_message(msg:str):
-            msg=msg.strip()
-            self.transcript_list.append(msg)
-            get_film_info(msg=msg, max_film_time=max_film_time)
-        
-        def get_film_info(msg:str, max_film_time:float=None)->dict[str,float]:
-            if not msg.startswith("Film time") or not wall_film_model_active:
-                return
-            results_dict = {}
-            results_dict["film_time"] = extract_number(msg, "Film time = ")
-            results_dict["timestep"] = extract_number(msg, "timestep = ")
-            results_dict["max_cfl"] = extract_number(msg, "max_cfl: ")
-            self.transcript_list.append(results_dict)
-            if results_dict["film_time"] >= max_film_time and isinstance(max_film_time, (float,int)):
-                logger.info("Max fill time reached, stopping the simulation")
-                stop_simulation()
-            return
-        
-        def extract_number(string:str, lookbehind_regex:str=None)->float:
-            regex_str = r"\d+\.\d+([eE][+-]\d+)*"
-            if isinstance(lookbehind_regex, str):
-                regex_str = fr"(?<={lookbehind_regex})"+regex_str
-            value = float(re.search(regex_str,string).group())
-            return value
-                
+            self.transcript.elaborate_msg(msg=msg)
+                        
         cbid = self.solver.transcript.register_callback(on_transcript_message)
         self.solver.transcript.start(write_to_stdout=True)
         return cbid
@@ -473,6 +432,8 @@ class FluentSubcaseSolver:
                 pass            
         
         new_run = self.subcase.generate_new_run()
+        transcript_df_save_path = new_run.path / f"{self.subcase.casesubcase_name}_transcript_df.csv"
+        self.transcript.export_to_csv(transcript_df_save_path)
         try:
             with open(log_file_path, "a") as f:
                 f.write(f"{new_run.name}\t{self.end_time}\t{self.subcase.casesubcase_name}\tdurata simulazione: {self.simulation_time}\tnumero di core: {self.fluent_solver.cores}\n")
@@ -483,9 +444,94 @@ class FluentSubcaseSolver:
             logger.error(f"Log file could not be written or the subcase was not simulated. Error {e}")
         logger.info("Postprocessing finished.")
 
-
     def _export_to_cfd_post(self):
         if not self.subcase.export_to_cfd_post:
             return
         qtys_list = self.case.data_file_quantities_list
         self.solver.tui.file.export.cdat_for_cfd_post__and__ensight(self.subcase.casesubcase_name, "()", "*", "()", " ".join(qtys_list), "()", "n")
+        
+class TranscriptElaborator:
+    def __init__(self, solver:Solver, max_film_time:float=None) -> None:
+        self.solver = solver
+        self.max_film_time = max_film_time
+        self.column_values = []
+        self._column_names = []
+        self._film_info = None
+        self._pseudo_dt = None
+        self.calculation_ended_event = Event()
+        walls_BC = solver.settings.setup.boundary_conditions.wall
+        wall_BC_list = list(walls_BC().keys())
+        self.wall_film_model_active = False
+        if "wall_film" in walls_BC()[wall_BC_list[0]]:
+            # self.solver.tui.define.models.eulerian_wallfilm.initialize_wallfilm_model()
+            self.wall_film_model_active = True
+        
+    def elaborate_msg(self, msg:str):
+        msg = msg.strip()
+        self._get_column_titles(msg)
+        self._get_pseudo_dt(msg)
+        self._get_film_info(msg, self.max_film_time)
+        self._get_column_values(msg)
+        
+    @staticmethod
+    def _extract_number(string:str, lookbehind_regex:str=None)->float:
+        regex_str = r"\d+\.\d+([eE][+-]\d+)*"
+        if isinstance(lookbehind_regex, str):
+            regex_str = fr"(?<={lookbehind_regex})"+regex_str
+        value = float(re.search(regex_str,string).group())
+        return value
+
+    def _add_to_values(self, results_dict: dict[str,str], attr_name:str):
+        attr = getattr(self,attr_name)
+        if attr == None:
+            return results_dict
+        results_dict = results_dict | attr
+        attr = None
+        return results_dict
+
+    def _get_column_titles(self, msg:str)->list[str]:
+        if not msg.startswith("iter"):
+            return
+        self._column_names = msg.split()
+        if self._column_names[-1] == "time/iter":
+            splitted = self._column_names.pop(-1).split("/")
+            splitted[-1] = "missing_iteration"
+            self._column_names = self._column_names + splitted
+    
+    def _get_column_values(self, msg:str):
+        if not bool(re.search(r"^\d+.*\d+$", msg)):
+            return
+        column_values = msg.split()
+        results_dict = dict(zip(self._column_names, column_values))
+        attr_list = ["_film_info", "_pseudo_dt"]
+        for attr_name in attr_list:
+            results_dict = self._add_to_values(results_dict, attr_name)
+        self.column_values.append(results_dict)
+    
+    def _get_pseudo_dt(self, msg:str):
+        regex = "Automatic flow pseudo-dt = "
+        if not msg.startswith(regex):
+            return
+        self._pseudo_dt= {"pseudo-dt" : self._extract_number(msg, regex)}
+    
+    def _stop_simulation(self):
+        i=0
+        while(i<5 and not self.calculation_ended_event.is_set()):
+            self.solver.execute_tui("(cx-interrupt)")
+            i = i + 1
+
+    def _get_film_info(self, msg:str, max_film_time:float=None)->dict[str,float]:
+        if not msg.startswith("Film time") or not self.wall_film_model_active:
+            return
+        results_dict = {}
+        results_dict["film_time"] = self._extract_number(msg, "Film time = ")
+        results_dict["film_timestep"] = self._extract_number(msg, "timestep = ")
+        results_dict["film_max_cfl"] = self._extract_number(msg, "max_cfl: ")
+        self._film_info = results_dict
+        if results_dict["film_time"] >= max_film_time and isinstance(max_film_time, (float,int)):
+            logger.info("Max fill time reached, stopping the simulation")
+            self._stop_simulation()
+    
+    def export_to_csv(self, save_path:Path):
+       df = pd.DataFrame(self.column_values)
+       df.to_csv(save_path, index=False)
