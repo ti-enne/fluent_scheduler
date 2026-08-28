@@ -282,18 +282,37 @@ class FluentSubcaseSolver:
                 "standard_resolution" : '2K QHD (2560x1440)'
             }
         
-        def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
-            if event_info.index % every_n_iteration !=0:
-                return
-            for contour_name in contour_list:
-                graphics.contour[contour_name].display()
-                for view_name in self.subcase.view_list:
-                    save_path = base_path / f"{contour_name}_{view_name}_iter{event_info.index}"
-                    graphics.views.restore_view(view_name=view_name)
-                    graphics.views.auto_scale()
-                    graphics.picture.save_picture(file_name=save_path.absolute())
+        # STEADY
+        if self.time_discretization == FluentSolverFlags.STEADY:
+            def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
+                if event_info.index % every_n_iteration !=0:
+                    return
+                for contour_name in contour_list:
+                    graphics.contour[contour_name].display()
+                    for view_name in self.subcase.view_list:
+                        save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_iter{event_info.index}"
+                        graphics.views.restore_view(view_name=view_name)
+                        graphics.views.auto_scale()
+                        graphics.picture.save_picture(file_name=save_path.absolute())
 
-        cbid = self.solver.events.register_callback(pyfluent.SolverEvent.ITERATION_ENDED, on_iteration_end)
+            cbid = self.solver.events.register_callback(pyfluent.SolverEvent.ITERATION_ENDED, on_iteration_end)
+        # TRANSIENT
+        else:
+            def on_iteration_end(session, event_info:pyfluent.TimestepEndedEventInfo):
+                print("Event info: ", event_info.index, event_info.size)
+                if event_info.index % every_n_iteration !=0:
+                    return
+                
+                for contour_name in contour_list:
+                    graphics.contour[contour_name].display()
+                    for view_name in self.subcase.view_list:
+                        save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_timestep{event_info.index}"
+                        graphics.views.restore_view(view_name=view_name)
+                        graphics.views.auto_scale()
+                        graphics.picture.save_picture(file_name=save_path.absolute())
+                        print(f"Saving img at: {save_path.absolute()}")
+
+            cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_iteration_end)
         return cbid
         
     def _define_transcript_callback(self) -> str:         
@@ -361,12 +380,17 @@ class FluentSubcaseSolver:
             self.solver.settings.solution.run_calculation.iter_count = self.subcase.first_order_iterations
             logger.info(f"Solving steady-state first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         else:
-            self.solver.settings.solution.run_calculation.transient_controls = {
-                'time_step_count': self.subcase.first_order_iterations,
-                'time_step_size': self.subcase.time_step_size,
-            }
+            self.solver.settings.solution.run_calculation.transient_controls.time_step_count = self.subcase.first_order_iterations
+            try:
+                self.solver.settings.solution.run_calculation.transient_controls.time_step_size = self.subcase.time_step_size
+            except RuntimeError:
+                logger.info(f"Time step size object is not active")
+                
             logger.info(f"Solving transient first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
-        self.solver.settings.solution.run_calculation.calculate()
+        try:
+            self.solver.settings.solution.run_calculation.calculate()
+        except RuntimeError:
+            logger.info(f"Calculation {self.time_discretization.value} has been stopped.")
         logger.info(f"Finished {self.time_discretization.value} first-order simulation")
         dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}_1storder.dat.h5"
         self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
@@ -378,25 +402,35 @@ class FluentSubcaseSolver:
         self.spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW.value
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
+        # STEADY
         if self.time_discretization == FluentSolverFlags.STEADY:
             second_order_no_convcond_iter = 100
             if second_order_no_convcond_iter < self.subcase.second_order_iterations:
                 logger.info(f"Solving steady-state second-order with convergence conditions disabled.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
                 self._manage_convergence_conditions(active=False)
                 self.solver.settings.solution.run_calculation.iter_count = second_order_no_convcond_iter
-                self.solver.settings.solution.run_calculation.calculate()
+                try:
+                    self.solver.settings.solution.run_calculation.calculate()
+                except RuntimeError:
+                    logger.info(f"Calculation {self.time_discretization.value} has been stopped.")
                 self.subcase.second_order_iterations = self.subcase.second_order_iterations - second_order_no_convcond_iter
                 logger.info(f"Solving steady-state second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
                 self._manage_convergence_conditions(active=True)
+            self.solver.settings.solution.run_calculation.iter_count = self.subcase.second_order_iterations
+        # TRANSIENT
         else:
             self._manage_convergence_conditions(active=False)
-            self.solver.settings.solution.run_calculation.transient_controls = {
-                'time_step_count': self.subcase.second_order_iterations,
-                'time_step_size': self.subcase.time_step_size,
-            }
+            self.solver.settings.solution.run_calculation.transient_controls.time_step_count = self.subcase.first_order_iterations
+            try:
+                self.solver.settings.solution.run_calculation.transient_controls.time_step_size = self.subcase.time_step_size
+            except RuntimeError:
+                logger.info(f"Time step size object is not active")
             logger.info(f"Solving transient second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
-        self.solver.settings.solution.run_calculation.iter_count = self.subcase.second_order_iterations
-        self.solver.settings.solution.run_calculation.calculate()
+        
+        try:
+            self.solver.settings.solution.run_calculation.calculate()
+        except RuntimeError:
+            logger.info(f"Calculation {self.time_discretization.value} has been stopped.")
         logger.info(f"Finished {self.time_discretization.value} second-order simulation")
         dat_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}.dat.h5"
         self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
@@ -413,7 +447,10 @@ class FluentSubcaseSolver:
         if iter > self.subcase.second_order_iterations:
             iter = self.subcase.second_order_iterations
         self.solver.settings.solution.run_calculation.iter_count = iter
-        self.solver.settings.solution.run_calculation.calculate()
+        try:
+            self.solver.settings.solution.run_calculation.calculate()
+        except RuntimeError:
+            logger.info(f"Calculation {self.time_discretization.value} has been stopped.")
         self._manage_UDS_equations(active=False)
         logger.info("Finished UDS simulation")
             
@@ -451,31 +488,27 @@ class FluentSubcaseSolver:
         self.solver.tui.file.export.cdat_for_cfd_post__and__ensight(self.subcase.casesubcase_name, "()", "*", "()", " ".join(qtys_list), "()", "n")
         
 class TranscriptElaborator:
-    def __init__(self, solver:Solver, max_film_time:float=None) -> None:
+    def __init__(self, solver:Solver=None, max_film_time:float=None) -> None:
         self.solver = solver
         self.max_film_time = max_film_time
         self.column_values = []
         self._column_names = []
+        self._flow_time_info = None
         self._film_info = None
-        self._pseudo_dt = None
-        self.calculation_ended_event = Event()
-        walls_BC = solver.settings.setup.boundary_conditions.wall
-        wall_BC_list = list(walls_BC().keys())
-        self.wall_film_model_active = False
-        if "wall_film" in walls_BC()[wall_BC_list[0]]:
-            # self.solver.tui.define.models.eulerian_wallfilm.initialize_wallfilm_model()
-            self.wall_film_model_active = True
-        
+        self._pseudo_dt_info = None
+        self.calculation_ended_event = Event()    
+    
     def elaborate_msg(self, msg:str):
         msg = msg.strip()
         self._get_column_titles(msg)
+        self._get_time_info(msg)
         self._get_pseudo_dt(msg)
-        self._get_film_info(msg, self.max_film_time)
+        self._get_film_info(msg)
         self._get_column_values(msg)
         
     @staticmethod
     def _extract_number(string:str, lookbehind_regex:str=None)->float:
-        regex_str = r"\d+\.\d+([eE][+-]\d+)*"
+        regex_str = r"\d+(.\d+)*([eE][+-]\d+)*"
         if isinstance(lookbehind_regex, str):
             regex_str = fr"(?<={lookbehind_regex})"+regex_str
         value = float(re.search(regex_str,string).group())
@@ -503,7 +536,7 @@ class TranscriptElaborator:
             return
         column_values = msg.split()
         results_dict = dict(zip(self._column_names, column_values))
-        attr_list = ["_film_info", "_pseudo_dt"]
+        attr_list = [item for item in self.__dict__.keys() if re.search(r"(_\w+)+_info", item)]
         for attr_name in attr_list:
             results_dict = self._add_to_values(results_dict, attr_name)
         self.column_values.append(results_dict)
@@ -512,23 +545,33 @@ class TranscriptElaborator:
         regex = "Automatic flow pseudo-dt = "
         if not msg.startswith(regex):
             return
-        self._pseudo_dt= {"pseudo-dt" : self._extract_number(msg, regex)}
+        self._pseudo_dt_info= {"pseudo-dt" : self._extract_number(msg, regex)}
     
     def _stop_simulation(self):
         i=0
         while(i<5 and not self.calculation_ended_event.is_set()):
-            self.solver.execute_tui("(cx-interrupt)")
+            if self.solver != None:
+                self.solver.execute_tui("(cx-interrupt)")
             i = i + 1
 
-    def _get_film_info(self, msg:str, max_film_time:float=None)->dict[str,float]:
-        if not msg.startswith("Film time") or not self.wall_film_model_active:
+    def _get_time_info(self, msg:str):
+        if not msg.startswith("Flow time"):
+            return
+        results_dict={
+            "flow_time" : self._extract_number(msg, "Flow time = "),
+            "time_step" : self._extract_number(msg, "time step = ")
+        }
+        self._flow_time_info = results_dict
+    
+    def _get_film_info(self, msg:str):
+        if not msg.startswith("Film time"):
             return
         results_dict = {}
         results_dict["film_time"] = self._extract_number(msg, "Film time = ")
         results_dict["film_timestep"] = self._extract_number(msg, "timestep = ")
         results_dict["film_max_cfl"] = self._extract_number(msg, "max_cfl: ")
         self._film_info = results_dict
-        if results_dict["film_time"] >= max_film_time and isinstance(max_film_time, (float,int)):
+        if isinstance(self.max_film_time, float) and results_dict["film_time"] >= self.max_film_time and isinstance(self.max_film_time, (float,int)):
             logger.info("Max fill time reached, stopping the simulation")
             self._stop_simulation()
     
