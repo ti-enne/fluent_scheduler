@@ -158,7 +158,7 @@ class FluentSubcaseSolver:
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
-        self.transcript = TranscriptElaborator(solver=self.solver, max_film_time=5)
+        self.transcript = TranscriptElaborator(solver=self.solver)
         cbid = self._define_save_img_callback()
         cbid = self._define_transcript_callback()
         self._manage_residuals()
@@ -272,7 +272,11 @@ class FluentSubcaseSolver:
         base_path = self.case.folder_path / "animations"
         contour_list = [item for item in graphics.contour().keys() if "-animation" in item]
         if not contour_list:
+            logger.info("No countours to save animations from")
             return
+        if not self.subcase.view_list:
+            logger.info("No views to save animations from")
+        
         if not base_path.exists(): base_path.mkdir()
         graphics.picture = {
                 "invert_background" : True,
@@ -288,6 +292,7 @@ class FluentSubcaseSolver:
                 if event_info.index % every_n_iteration !=0:
                     return
                 for contour_name in contour_list:
+                    self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, iteration: {event_info.index}\n")')
                     graphics.contour[contour_name].display()
                     for view_name in self.subcase.view_list:
                         save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_iter{event_info.index}"
@@ -304,13 +309,13 @@ class FluentSubcaseSolver:
                     return
                 
                 for contour_name in contour_list:
+                    self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, time step: {event_info.index}\n")')
                     graphics.contour[contour_name].display()
                     for view_name in self.subcase.view_list:
                         save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_timestep{event_info.index}"
                         graphics.views.restore_view(view_name=view_name)
                         graphics.views.auto_scale()
                         graphics.picture.save_picture(file_name=save_path.absolute())
-                        print(f"Saving img at: {save_path.absolute()}")
 
             cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_iteration_end)
         return cbid
@@ -384,7 +389,7 @@ class FluentSubcaseSolver:
             try:
                 self.solver.settings.solution.run_calculation.transient_controls.time_step_size = self.subcase.time_step_size
             except RuntimeError:
-                logger.info(f"Time step size object is not active")
+                logger.info(f"Time step is adaptive. Time step size object is not active")
                 
             logger.info(f"Solving transient first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         try:
@@ -488,39 +493,52 @@ class FluentSubcaseSolver:
         self.solver.tui.file.export.cdat_for_cfd_post__and__ensight(self.subcase.casesubcase_name, "()", "*", "()", " ".join(qtys_list), "()", "n")
         
 class TranscriptElaborator:
-    def __init__(self, solver:Solver=None, max_film_time:float=None) -> None:
+    solver : Solver
+    column_values : list[dict[str,float]]
+    _column_names : list[str]
+    _pending_line : dict[str,float]
+    
+    def __init__(self, solver:Solver=None) -> None:
         self.solver = solver
-        self.max_film_time = max_film_time
+        self._pending_line = {}
         self.column_values = []
         self._column_names = []
-        self._flow_time_info = None
-        self._film_info = None
-        self._pseudo_dt_info = None
-        self.calculation_ended_event = Event()    
     
-    def elaborate_msg(self, msg:str):
+    def elaborate_msg(self, msg:str, max_transient_time:float=None, max_film_time:float=None):
         msg = msg.strip()
         self._get_column_titles(msg)
-        self._get_time_info(msg)
-        self._get_pseudo_dt(msg)
-        self._get_film_info(msg)
+        self._get_transient_flow_info(msg,max_transient_time)
+        self._get_pseudo_dt_info(msg)
+        self._get_film_values(msg,max_film_time=max_film_time)
         self._get_column_values(msg)
         
     @staticmethod
     def _extract_number(string:str, lookbehind_regex:str=None)->float:
-        regex_str = r"\d+(.\d+)*([eE][+-]\d+)*"
+        regex_str = r"\d+(\.\d+)*([eE][+-]\d+)*"
         if isinstance(lookbehind_regex, str):
             regex_str = fr"(?<={lookbehind_regex})"+regex_str
         value = float(re.search(regex_str,string).group())
         return value
 
-    def _add_to_values(self, results_dict: dict[str,str], attr_name:str):
-        attr = getattr(self,attr_name)
-        if attr == None:
-            return results_dict
-        results_dict = results_dict | attr
-        attr = None
-        return results_dict
+    def add_to_pending(self, item:dict[str,float]):
+        if "film_time" not in item.keys() and bool(self._pending_line.keys() & item.keys()):
+            self.column_values.append(self._pending_line)
+            self._pending_line = {}
+
+        self._pending_line.update(item)
+
+    def _stop_simulation(self, actual_time:float, max_time:float):
+        if max_time == None:
+            return
+        if actual_time < max_time:
+            return
+        
+        logger.info("Max time reached, stopping the simulation")
+        i=0
+        while(i<5):
+            if self.solver != None:
+                self.solver.execute_tui("(cx-interrupt)")
+            i = i + 1
 
     def _get_column_titles(self, msg:str)->list[str]:
         if not msg.startswith("iter"):
@@ -535,46 +553,41 @@ class TranscriptElaborator:
         if not bool(re.search(r"^\d+.*\d+$", msg)):
             return
         column_values = msg.split()
-        results_dict = dict(zip(self._column_names, column_values))
-        attr_list = [item for item in self.__dict__.keys() if re.search(r"(_\w+)+_info", item)]
-        for attr_name in attr_list:
-            results_dict = self._add_to_values(results_dict, attr_name)
-        self.column_values.append(results_dict)
+        if len(self._column_names) > len(column_values):
+            results_dict = dict(zip(self._column_names[:-2], column_values[:-2]))
+            results_dict.update(dict(zip(self._column_names[-2:], column_values[-2:])))
+        else:
+            results_dict = dict(zip(self._column_names, column_values))
+        self.add_to_pending(results_dict)
     
-    def _get_pseudo_dt(self, msg:str):
+    def _get_pseudo_dt_info(self, msg:str):
         regex = "Automatic flow pseudo-dt = "
         if not msg.startswith(regex):
             return
-        self._pseudo_dt_info= {"pseudo-dt" : self._extract_number(msg, regex)}
-    
-    def _stop_simulation(self):
-        i=0
-        while(i<5 and not self.calculation_ended_event.is_set()):
-            if self.solver != None:
-                self.solver.execute_tui("(cx-interrupt)")
-            i = i + 1
-
-    def _get_time_info(self, msg:str):
+        self.add_to_pending({"pseudo-dt" : self._extract_number(msg, regex)})
+        
+    def _get_transient_flow_info(self, msg:str, max_transient_time:float):
         if not msg.startswith("Flow time"):
             return
         results_dict={
             "flow_time" : self._extract_number(msg, "Flow time = "),
             "time_step" : self._extract_number(msg, "time step = ")
         }
-        self._flow_time_info = results_dict
+        self.add_to_pending(results_dict)
+        self._stop_simulation(results_dict["flow_time"], max_transient_time)
     
-    def _get_film_info(self, msg:str):
+    def _get_film_values(self, msg:str, max_film_time:float):
         if not msg.startswith("Film time"):
             return
-        results_dict = {}
-        results_dict["film_time"] = self._extract_number(msg, "Film time = ")
-        results_dict["film_timestep"] = self._extract_number(msg, "timestep = ")
-        results_dict["film_max_cfl"] = self._extract_number(msg, "max_cfl: ")
-        self._film_info = results_dict
-        if isinstance(self.max_film_time, float) and results_dict["film_time"] >= self.max_film_time and isinstance(self.max_film_time, (float,int)):
-            logger.info("Max fill time reached, stopping the simulation")
-            self._stop_simulation()
+        results_dict = {
+            "film_time" : self._extract_number(msg, "Film time = "),
+            "film_timestep" : self._extract_number(msg, "timestep = "),
+            "film_max_cfl" : self._extract_number(msg, "max_cfl: ")
+        }
+        self.add_to_pending(results_dict)
+        self._stop_simulation(results_dict["film_time"], max_film_time)
     
     def export_to_csv(self, save_path:Path):
-       df = pd.DataFrame(self.column_values)
-       df.to_csv(save_path, index=False)
+        self.column_values.append(self._pending_line)
+        df = pd.DataFrame(self.column_values)
+        df.to_csv(save_path, index=False)
