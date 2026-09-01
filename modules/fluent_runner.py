@@ -10,7 +10,7 @@ import datetime
 from modules.commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
 import logging
 import textwrap
-from modules.fluent_flags import FluentSolverFlags,FluentSpatialSchemes
+from modules.fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType
 from threading import Event
 from numpy import ceil
 import pandas as pd
@@ -35,7 +35,8 @@ class FluentSolver:
             "processor_count" : cores,
             "gpu" : gpu,
             "ui_mode" : "gui",
-            "cwd" : r"F:\01_FLUENT_SIM\fluent_logs"
+            "cwd" : r"F:\01_FLUENT_SIM\fluent_logs",
+            # "server_info_file_name" : "server.txt"
         }
 
         # Starting the fluent session
@@ -58,7 +59,6 @@ class FluentSolver:
                                     Error:\t{repr(e)}
                                     ''')
                 logging.error(msg)
-                print(msg)
                 subprocess.run(fluent_killer_path) #Kill ALL the Fluent processes
                 retry_attempt = retry_attempt + 1
                 if retry_attempt == max_retry_attempts:
@@ -71,7 +71,7 @@ class FluentSolver:
     def quit_fluent(self):
         self.solver.exit()
         
-    def load_cas(self) -> FluentSolverFlags:
+    def load_cas(self) -> FluentTimeDiscretization:
         logger.info("="*80, extra={"plain":True})
         logger.info(f"Loading case {self.case.parent_commission.name} -> {self.case.name}")
         self.solver.settings.file.read(file_type="case", file_name=self.case.cas_file_path)
@@ -127,7 +127,7 @@ class FluentSubcaseSolver:
 
     def _build_time_discretization(self):
         fluent_solver_mode = self.solver.settings.setup.general.solver.time() #Time discretization type
-        return FluentSolverFlags(fluent_solver_mode)
+        return FluentTimeDiscretization(fluent_solver_mode)
     
     def _build_spatial_discretization(self) -> FluentSpatialSchemes:
         if self.subcase.first_order_solve:
@@ -209,7 +209,7 @@ class FluentSubcaseSolver:
     
     def _manage_time_step(self):
         #Perchè se leggo il .dat mi viene modificato il time-step in automatico.
-        if  self.time_discretization == FluentSolverFlags.STEADY:
+        if  self.time_discretization == FluentTimeDiscretization.STEADY:
             return
         try:
             time_step_size = self.solver.settings.solution.run_calculation.transient_controls.time_step_size()
@@ -225,7 +225,7 @@ class FluentSubcaseSolver:
             "case_frequency" : "if-mesh-is-modified",
             "retain_most_recent_files" : True,
         }
-        if self.time_discretization == FluentSolverFlags.STEADY:
+        if self.time_discretization == FluentTimeDiscretization.STEADY:
             every_n_iter = ceil(max([self.subcase.first_order_iterations, self.subcase.second_order_iterations])/3)
             if every_n_iter < 100:
                 every_n_iter = 100
@@ -264,9 +264,8 @@ class FluentSubcaseSolver:
         self.solver.settings.file.start_transcript(file_name=transcript_file_path.absolute()) #Inizio a scrivere il file di transcript.
 
     def _define_save_img_callback(self) -> str:
-        self.solver.tui.display.set.rendering_options.driver("null") #to avoid crash when using RDP and the remote session is closed. To keep screenshots, use tsdiscon in cmd instead of closing the session
-        every_n_iteration = self.subcase.save_img_every
-        if every_n_iteration in [0,None]:
+        self.solver.tui.display.set.rendering_options.driver("null") #to avoid crash when using RDP and the remote session is closed.
+        if self.subcase.save_img_every in [0,None]:
             return
         graphics = self.solver.settings.results.graphics
         base_path = self.case.folder_path / "animations"
@@ -287,9 +286,9 @@ class FluentSubcaseSolver:
             }
         
         # STEADY
-        if self.time_discretization == FluentSolverFlags.STEADY:
+        if self.time_discretization == FluentTimeDiscretization.STEADY:
             def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
-                if event_info.index % every_n_iteration !=0:
+                if event_info.index % self.subcase.save_img_every !=0:
                     return
                 for contour_name in contour_list:
                     self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, iteration: {event_info.index}\n")')
@@ -303,26 +302,30 @@ class FluentSubcaseSolver:
             cbid = self.solver.events.register_callback(pyfluent.SolverEvent.ITERATION_ENDED, on_iteration_end)
         # TRANSIENT
         else:
+            self._next_image_time = 0.0
             def on_iteration_end(session, event_info:pyfluent.TimestepEndedEventInfo):
-                print("Event info: ", event_info.index, event_info.size)
-                if event_info.index % every_n_iteration !=0:
+                if "flow_time" not in self.transcript.column_values[-1].keys():
+                    return
+                flow_time = self.transcript.column_values[-1]["flow_time"]
+                if flow_time<self._next_image_time:
                     return
                 
                 for contour_name in contour_list:
-                    self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, time step: {event_info.index}\n")')
+                    self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, time: {flow_time}\n")')
                     graphics.contour[contour_name].display()
                     for view_name in self.subcase.view_list:
-                        save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_timestep{event_info.index}"
+                        save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_time{flow_time}"
                         graphics.views.restore_view(view_name=view_name)
                         graphics.views.auto_scale()
                         graphics.picture.save_picture(file_name=save_path.absolute())
+                self._next_image_time += self.subcase.save_img_every
 
             cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_iteration_end)
         return cbid
         
     def _define_transcript_callback(self) -> str:         
         def on_transcript_message(msg:str):
-            self.transcript.elaborate_msg(msg=msg)
+            self.transcript.elaborate_msg(msg=msg, max_transient_time=5, max_film_time=5)
                         
         cbid = self.solver.transcript.register_callback(on_transcript_message)
         self.solver.transcript.start(write_to_stdout=True)
@@ -332,16 +335,16 @@ class FluentSubcaseSolver:
         residuals = self.solver.settings.solution.monitor.residual
         residuals.options.residual_values.compute_local_scale = True
         
-        if self.time_discretization != FluentSolverFlags.STEADY: #transient
+        if self.time_discretization != FluentTimeDiscretization.STEADY: #transient
             residuals.options.criterion_type = "relative or absolute" # Only exists if the study is transient
             #Equation name [abs residuals, rel residuals]
             residuals_criteria={
-                "continuity": [1e-4,1e-2], 
-                ".*-velocity": [1e-5,1e-3], 
-                "k": [1e-5,1e-3],
-                "omega": [1e-5,1e-3],
-                "epsilon": [1e-5,1e-3],
-                "energy": [1e-7,1e-5],
+                "continuity": [1e-1,1e-1], 
+                ".*-velocity": [1e-3,1e-2], 
+                "k": [1e-3,1e-2],
+                "omega": [1e-3,1e-2],
+                "epsilon": [1e-3,1e-2],
+                "energy": [1e-4,1e-3],
                 "vf-.*": [1e-3,1e-2] #multiphase residual
             }
         else: #steady-state
@@ -373,24 +376,50 @@ class FluentSubcaseSolver:
                         "absolute_criteria" : value[0],
                         "relative_criteria" : value[1],
                     }
+        
+        return
 
-    def _solve_first_order(self):
+    def _setup_transient_controls(self, iterations:int) -> None:
+        if self.time_discretization == FluentTimeDiscretization.STEADY:
+            return
+        
+        duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
+        duration_specification = FluentTransientDurationMethod(duration_specification)
+        transient_type = self.solver.settings.solution.run_calculation.transient_controls.type()
+        transient_type = FluentTransientType(transient_type)
+        transient_controls = self.solver.settings.solution.run_calculation.transient_controls
+        if duration_specification == FluentTransientType.FIXED:
+            transient_controls.time_step_size = self.subcase.time_step_size
+        
+        if duration_specification == FluentTransientDurationMethod.TOTAL_TIME:
+            self.solver.scheme.eval(f'(display ">>> Setting total time to: {iterations}s\n")')
+            transient_controls.total_time = iterations
+        elif duration_specification == FluentTransientDurationMethod.TOTAL_TIME_STEPS:
+            self.solver.scheme.eval(f'(display ">>> Setting total time steps: {iterations}s\n")')
+            transient_controls.total_time_step_count = iterations
+        elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME:
+            self.solver.scheme.eval(f'(display ">>> Solving for {iterations}s\n")')
+            transient_controls.incremental_time = iterations
+        elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME_STEPS or duration_specification == FluentTransientType.FIXED:
+            self.solver.scheme.eval(f'(display ">>> Solving for {iterations} time steps\n")')
+            transient_controls.time_step_count = iterations
+        else:
+            logger.error("Duration specification type not found.")
+        return
+    
+    def _solve_first_order(self) -> None:
         if not self.subcase.first_order_solve:
             return
         discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
         self.spatial_discretization = FluentSpatialSchemes.FIRST_ORDER_UW.value
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
-        if self.time_discretization == FluentSolverFlags.STEADY:
+        if self.time_discretization == FluentTimeDiscretization.STEADY:
             self.solver.settings.solution.run_calculation.iter_count = self.subcase.first_order_iterations
             logger.info(f"Solving steady-state first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         else:
-            self.solver.settings.solution.run_calculation.transient_controls.time_step_count = self.subcase.first_order_iterations
-            try:
-                self.solver.settings.solution.run_calculation.transient_controls.time_step_size = self.subcase.time_step_size
-            except RuntimeError:
-                logger.info(f"Time step is adaptive. Time step size object is not active")
-                
+            self._manage_convergence_conditions(active=False)
+            self._setup_transient_controls(self.subcase.first_order_iterations)                
             logger.info(f"Solving transient first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         try:
             self.solver.settings.solution.run_calculation.calculate()
@@ -408,7 +437,7 @@ class FluentSubcaseSolver:
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
         # STEADY
-        if self.time_discretization == FluentSolverFlags.STEADY:
+        if self.time_discretization == FluentTimeDiscretization.STEADY:
             second_order_no_convcond_iter = 100
             if second_order_no_convcond_iter < self.subcase.second_order_iterations:
                 logger.info(f"Solving steady-state second-order with convergence conditions disabled.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
@@ -425,11 +454,7 @@ class FluentSubcaseSolver:
         # TRANSIENT
         else:
             self._manage_convergence_conditions(active=False)
-            self.solver.settings.solution.run_calculation.transient_controls.time_step_count = self.subcase.first_order_iterations
-            try:
-                self.solver.settings.solution.run_calculation.transient_controls.time_step_size = self.subcase.time_step_size
-            except RuntimeError:
-                logger.info(f"Time step size object is not active")
+            self._setup_transient_controls(self.subcase.second_order_iterations)                
             logger.info(f"Solving transient second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         
         try:
