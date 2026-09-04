@@ -34,6 +34,7 @@ class FluentSolver:
             "gpu" : gpu,
             "ui_mode" : "gui",
             "cwd" : r"F:\01_FLUENT_SIM\fluent_logs",
+            # "graphics_driver" : "none",
             # "server_info_file_name" : "server.txt"
         }
 
@@ -156,7 +157,8 @@ class FluentSubcaseSolver:
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
-        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase)
+        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
+        self._define_transcript_callback()
         self._manage_residuals()
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path) #To avoid auto-save writing .cas file.
         self._solve_first_order()
@@ -259,9 +261,10 @@ class FluentSubcaseSolver:
             logger.info(f"{transcript_file_path.name} do not exists.")
         self.solver.settings.file.start_transcript(file_name=transcript_file_path.absolute()) #Inizio a scrivere il file di transcript.
         
-    def _define_transcript_callback(self) -> str:         
+    def _define_transcript_callback(self) -> str:   
+        self.transcript.print_to_fluent_console(f'Defining callback for transcript message event')
         def on_transcript_message(msg:str):
-            self.transcript.elaborate_msg(msg=msg, max_transient_time=5, max_film_time=5)
+            self.transcript.elaborate_msg(msg=msg)
                         
         cbid = self.solver.transcript.register_callback(on_transcript_message)
         self.solver.transcript.start(write_to_stdout=True)
@@ -271,8 +274,8 @@ class FluentSubcaseSolver:
         residuals = self.solver.settings.solution.monitor.residual
         residuals.options.residual_values.compute_local_scale = True
         
-        if self.time_discretization != FluentTimeDiscretization.STEADY: #transient
-            residuals.options.criterion_type = "relative or absolute" # Only exists if the study is transient
+        if self.time_discretization != FluentTimeDiscretization.STEADY:
+            residuals.options.criterion_type = "relative or absolute" # Only exists if the simulation is transient
             #Equation name [abs residuals, rel residuals]
             residuals_criteria={
                 "continuity": [1e-1,1e-1], 
@@ -319,28 +322,28 @@ class FluentSubcaseSolver:
         if self.time_discretization == FluentTimeDiscretization.STEADY:
             return
         
-        try: 
-            duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
-            duration_specification = FluentTransientDurationMethod(duration_specification)
-        except:
-            duration_specification = None
         transient_type = self.solver.settings.solution.run_calculation.transient_controls.type()
         transient_type = FluentTransientType(transient_type)
         transient_controls = self.solver.settings.solution.run_calculation.transient_controls
-        if duration_specification == FluentTransientType.FIXED:
+        if transient_type == FluentTransientType.FIXED:
+            self.transcript.print_to_fluent_console(f'Solving for {iterations} time steps')
             transient_controls.time_step_size = self.subcase.time_step_size
+            transient_controls.time_step_count = iterations
+            return
         
+        duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
+        duration_specification = FluentTransientDurationMethod(duration_specification)
         if duration_specification == FluentTransientDurationMethod.TOTAL_TIME:
-            self.solver.scheme.eval(f'(display ">>> Setting total time to: {iterations}s\n")')
+            self.transcript.print_to_fluent_console(f'Setting total time to: {iterations}s')
             transient_controls.total_time = iterations
         elif duration_specification == FluentTransientDurationMethod.TOTAL_TIME_STEPS:
-            self.solver.scheme.eval(f'(display ">>> Setting total time steps: {iterations}s\n")')
+            self.transcript.print_to_fluent_console(f'Setting total time steps: {iterations}s')
             transient_controls.total_time_step_count = iterations
         elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME:
-            self.solver.scheme.eval(f'(display ">>> Solving for {iterations}s\n")')
+            self.transcript.print_to_fluent_console(f'Solving for {iterations}s')
             transient_controls.incremental_time = iterations
-        elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME_STEPS or duration_specification == FluentTransientType.FIXED:
-            self.solver.scheme.eval(f'(display ">>> Solving for {iterations} time steps\n")')
+        elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME_STEPS:
+            self.transcript.print_to_fluent_console(f'Solving for {iterations} time steps')
             transient_controls.time_step_count = iterations
         else:
             logger.error("Duration specification type not found.")
