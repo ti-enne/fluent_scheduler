@@ -1,19 +1,17 @@
-from dataclasses import dataclass, field
 import regex as re
 from pathlib import Path
 import ansys.fluent.core as pyfluent
-from ansys.fluent.core.streaming_services.events_streaming import SolverEvent
 from ansys.fluent.core.session_solver import Solver
 import subprocess
 import send2trash as s2t
 import datetime
-from modules.commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
 import logging
 import textwrap
-from modules.fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType
-from threading import Event
 from numpy import ceil
-import pandas as pd
+
+from modules.commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
+from modules.fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType
+from modules.transcript_elaborator import TranscriptElaboratorRuntime
 
 logger = logging.getLogger(__name__)
 fluent_killer_path: Path =  Path(r"F:\01_FLUENT_SIM\UTILITIES_FLUENT\fluent_killer.bat")
@@ -158,9 +156,7 @@ class FluentSubcaseSolver:
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
-        self.transcript = TranscriptElaborator(solver=self.solver)
-        cbid = self._define_save_img_callback()
-        cbid = self._define_transcript_callback()
+        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase)
         self._manage_residuals()
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path) #To avoid auto-save writing .cas file.
         self._solve_first_order()
@@ -262,66 +258,6 @@ class FluentSubcaseSolver:
         except:
             logger.info(f"{transcript_file_path.name} do not exists.")
         self.solver.settings.file.start_transcript(file_name=transcript_file_path.absolute()) #Inizio a scrivere il file di transcript.
-
-    def _define_save_img_callback(self) -> str:
-        self.solver.tui.display.set.rendering_options.driver("null") #to avoid crash when using RDP and the remote session is closed.
-        if self.subcase.save_img_every in [0,None]:
-            return
-        graphics = self.solver.settings.results.graphics
-        base_path = self.case.folder_path / "animations"
-        contour_list = [item for item in graphics.contour().keys() if "-animation" in item]
-        if not contour_list:
-            logger.info("No countours to save animations from")
-            return
-        if not self.subcase.view_list:
-            logger.info("No views to save animations from")
-        
-        if not base_path.exists(): base_path.mkdir()
-        graphics.picture = {
-                "invert_background" : True,
-                "landscape" : True,
-                "color_mode" : "color",
-                "use_window_resolution" : False,
-                "standard_resolution" : '2K QHD (2560x1440)'
-            }
-        
-        # STEADY
-        if self.time_discretization == FluentTimeDiscretization.STEADY:
-            def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
-                if event_info.index % self.subcase.save_img_every !=0:
-                    return
-                for contour_name in contour_list:
-                    self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, iteration: {event_info.index}\n")')
-                    graphics.contour[contour_name].display()
-                    for view_name in self.subcase.view_list:
-                        save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_iter{event_info.index}"
-                        graphics.views.restore_view(view_name=view_name)
-                        graphics.views.auto_scale()
-                        graphics.picture.save_picture(file_name=save_path.absolute())
-
-            cbid = self.solver.events.register_callback(pyfluent.SolverEvent.ITERATION_ENDED, on_iteration_end)
-        # TRANSIENT
-        else:
-            self._next_image_time = 0.0
-            def on_iteration_end(session, event_info:pyfluent.TimestepEndedEventInfo):
-                if "flow_time" not in self.transcript.column_values[-1].keys():
-                    return
-                flow_time = self.transcript.column_values[-1]["flow_time"]
-                if flow_time<self._next_image_time:
-                    return
-                
-                for contour_name in contour_list:
-                    self.solver.scheme.eval(f'(display ">>> Saving images for contour {contour_name}, time: {flow_time}\n")')
-                    graphics.contour[contour_name].display()
-                    for view_name in self.subcase.view_list:
-                        save_path = base_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_time{flow_time}"
-                        graphics.views.restore_view(view_name=view_name)
-                        graphics.views.auto_scale()
-                        graphics.picture.save_picture(file_name=save_path.absolute())
-                self._next_image_time += self.subcase.save_img_every
-
-            cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_iteration_end)
-        return cbid
         
     def _define_transcript_callback(self) -> str:         
         def on_transcript_message(msg:str):
@@ -383,8 +319,11 @@ class FluentSubcaseSolver:
         if self.time_discretization == FluentTimeDiscretization.STEADY:
             return
         
-        duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
-        duration_specification = FluentTransientDurationMethod(duration_specification)
+        try: 
+            duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
+            duration_specification = FluentTransientDurationMethod(duration_specification)
+        except:
+            duration_specification = None
         transient_type = self.solver.settings.solution.run_calculation.transient_controls.type()
         transient_type = FluentTransientType(transient_type)
         transient_controls = self.solver.settings.solution.run_calculation.transient_controls
@@ -517,102 +456,3 @@ class FluentSubcaseSolver:
         qtys_list = self.case.data_file_quantities_list
         self.solver.tui.file.export.cdat_for_cfd_post__and__ensight(self.subcase.casesubcase_name, "()", "*", "()", " ".join(qtys_list), "()", "n")
         
-class TranscriptElaborator:
-    solver : Solver
-    column_values : list[dict[str,float]]
-    _column_names : list[str]
-    _pending_line : dict[str,float]
-    
-    def __init__(self, solver:Solver=None) -> None:
-        self.solver = solver
-        self._pending_line = {}
-        self.column_values = []
-        self._column_names = []
-    
-    def elaborate_msg(self, msg:str, max_transient_time:float=None, max_film_time:float=None):
-        msg = msg.strip()
-        self._get_column_titles(msg)
-        self._get_transient_flow_info(msg,max_transient_time)
-        self._get_pseudo_dt_info(msg)
-        self._get_film_values(msg,max_film_time=max_film_time)
-        self._get_column_values(msg)
-        
-    @staticmethod
-    def _extract_number(string:str, lookbehind_regex:str=None)->float:
-        regex_str = r"\d+(\.\d+)*([eE][+-]\d+)*"
-        if isinstance(lookbehind_regex, str):
-            regex_str = fr"(?<={lookbehind_regex})"+regex_str
-        value = float(re.search(regex_str,string).group())
-        return value
-
-    def add_to_pending(self, item:dict[str,float]):
-        if "film_time" not in item.keys() and bool(self._pending_line.keys() & item.keys()):
-            self.column_values.append(self._pending_line)
-            self._pending_line = {}
-
-        self._pending_line.update(item)
-
-    def _stop_simulation(self, actual_time:float, max_time:float):
-        if max_time == None:
-            return
-        if actual_time < max_time:
-            return
-        
-        logger.info("Max time reached, stopping the simulation")
-        i=0
-        while(i<5):
-            if self.solver != None:
-                self.solver.execute_tui("(cx-interrupt)")
-            i = i + 1
-
-    def _get_column_titles(self, msg:str)->list[str]:
-        if not msg.startswith("iter"):
-            return
-        self._column_names = msg.split()
-        if self._column_names[-1] == "time/iter":
-            splitted = self._column_names.pop(-1).split("/")
-            splitted[-1] = "missing_iteration"
-            self._column_names = self._column_names + splitted
-    
-    def _get_column_values(self, msg:str):
-        if not bool(re.search(r"^\d+.*\d+$", msg)):
-            return
-        column_values = msg.split()
-        if len(self._column_names) > len(column_values):
-            results_dict = dict(zip(self._column_names[:-2], column_values[:-2]))
-            results_dict.update(dict(zip(self._column_names[-2:], column_values[-2:])))
-        else:
-            results_dict = dict(zip(self._column_names, column_values))
-        self.add_to_pending(results_dict)
-    
-    def _get_pseudo_dt_info(self, msg:str):
-        regex = "Automatic flow pseudo-dt = "
-        if not msg.startswith(regex):
-            return
-        self.add_to_pending({"pseudo-dt" : self._extract_number(msg, regex)})
-        
-    def _get_transient_flow_info(self, msg:str, max_transient_time:float):
-        if not msg.startswith("Flow time"):
-            return
-        results_dict={
-            "flow_time" : self._extract_number(msg, "Flow time = "),
-            "time_step" : self._extract_number(msg, "time step = ")
-        }
-        self.add_to_pending(results_dict)
-        self._stop_simulation(results_dict["flow_time"], max_transient_time)
-    
-    def _get_film_values(self, msg:str, max_film_time:float):
-        if not msg.startswith("Film time"):
-            return
-        results_dict = {
-            "film_time" : self._extract_number(msg, "Film time = "),
-            "film_timestep" : self._extract_number(msg, "timestep = "),
-            "film_max_cfl" : self._extract_number(msg, "max_cfl: ")
-        }
-        self.add_to_pending(results_dict)
-        self._stop_simulation(results_dict["film_time"], max_film_time)
-    
-    def export_to_csv(self, save_path:Path):
-        self.column_values.append(self._pending_line)
-        df = pd.DataFrame(self.column_values)
-        df.to_csv(save_path, index=False)
