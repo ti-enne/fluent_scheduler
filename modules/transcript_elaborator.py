@@ -165,7 +165,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         
         graphics = self.solver.settings.results.graphics
         self.total_time = self.solver.rp_vars("flow-time")
-        self._next_image_time = self.total_time + (self.subcase.save_img_every - self.total_time % self.subcase.save_img_every) * (self.total_time % self.subcase.save_img_every==0)
+        self._next_image_time = self.total_time + (self.subcase.save_img_every - self.total_time % self.subcase.save_img_every)
         def on_iteration_end(session, event_info:pyfluent.TimestepEndedEventInfo):
             self.total_time = self.solver.rp_vars("flow-time")
             if self.total_time<self._next_image_time:
