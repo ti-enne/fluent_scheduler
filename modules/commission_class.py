@@ -19,8 +19,6 @@ class FluentCommission:
     folder_path:Path
     cases_list:list["FluentCase"]
     cases_dict:dict[str,"FluentCase"]
-    available_cases:list[str]
-    
     
     def __init__(self, name : str, root_path : Path = Path(r"F:\01_FLUENT_SIM")):
         self.name = name
@@ -28,7 +26,6 @@ class FluentCommission:
         self.folder_path = self._build_folder_path(root_path)
         self.cases_list = self._build_cases_list()
         self.cases_dict = {case.name : case for case in self.cases_list}
-        self.available_cases = list(self.cases_dict.keys())
     
     def _build_folder_path(self, root_path:Path) -> Path:
         folder_path = root_path / self.name / "05_Risultati" / "Analisi"

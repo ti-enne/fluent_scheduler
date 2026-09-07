@@ -1,1 +1,1 @@
-from .commission_schema import CommissionInfo, CommissionOut
+from .commission_schema import CommissionInfo, CommissionOut, CommissionParametersOut

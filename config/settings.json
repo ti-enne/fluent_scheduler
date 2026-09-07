@@ -1,5 +1,6 @@
 {
     "root_folder" : "F:\\01_FLUENT_SIM",
+    "additional_path" : "\\05_Risultati\\Analisi",
     "commission_regex" : "^(D4P|SVILSIM)",
     "simulation_parameters_default_name" : "commission_parameters.json"
 }
