@@ -153,7 +153,6 @@ class FluentSubcaseSolver:
         self._manage_named_expressions()
         self._manage_report_files()
         self._manage_solution_verbosity()
-        time_step_size = self._manage_time_step()
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
@@ -205,18 +204,6 @@ class FluentSubcaseSolver:
             
         # self.solver.settings.solution.calculation_activity.solution_animations.clear() #rimuovo tutte le animazioni da Fluent. Danno bug quando modifico il path in cui salvarle tramite script (Il method esiste anche se non viene autocompletato)
     
-    def _manage_time_step(self):
-        #Perchè se leggo il .dat mi viene modificato il time-step in automatico.
-        if  self.time_discretization == FluentTimeDiscretization.STEADY:
-            return
-        try:
-            time_step_size = self.solver.settings.solution.run_calculation.transient_controls.time_step_size()
-        except:
-            time_step_size = None
-            logger.info("No time-step size to read. Skipping.")
-        
-        return time_step_size
-        
     def _manage_auto_save(self):
         auto_save_dict = {
             'root_name': f'./{self.subcase.casesubcase_name}',
@@ -331,6 +318,7 @@ class FluentSubcaseSolver:
             transient_controls.time_step_count = iterations
             return
         
+        transient_controls.cfl_based_time_stepping.courant_number = self.subcase.time_step_size
         duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
         duration_specification = FluentTransientDurationMethod(duration_specification)
         if duration_specification == FluentTransientDurationMethod.TOTAL_TIME:

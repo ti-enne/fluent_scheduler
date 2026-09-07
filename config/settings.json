@@ -1,0 +1,5 @@
+{
+    "root_folder" : "F:\\01_FLUENT_SIM",
+    "commission_regex" : "^(D4P|SVILSIM)",
+    "simulation_parameters_default_name" : "commission_parameters.json"
+}
