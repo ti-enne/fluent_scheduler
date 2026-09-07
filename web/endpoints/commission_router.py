@@ -5,9 +5,10 @@ from config.settings import settings
 from web.schemas import CommissionOut,CommissionParametersOut
 from modules import FluentCommission
 
-router = APIRouter(prefix="/commissions/{commission_name}")
+router = APIRouter(prefix="/commissions/{commission_name}", tags=["commission"])
 
 commission_list : dict[str,FluentCommission] = {}
+selected_commissions : set = {}
 @router.get("/", response_model=CommissionOut)
 def commision_details(commission_name:str):
     commission_path = settings.root_folder / commission_name
@@ -37,6 +38,10 @@ def get_parameters(commission_name:str):
         "available_cases" : commission.available_cases,
         "parameters" : parameters
     }
+    
+@router.post("/select")
+def select_commission(commission_name:str):
+    if 
     
     
     
