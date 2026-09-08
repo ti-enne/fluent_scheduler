@@ -2,8 +2,8 @@ import regex as re
 from pathlib import Path
 from ansys.fluent.core.session_solver import Solver
 import ansys.fluent.core as pyfluent
-from modules.commission_parameters import SubcaseParameters
-from modules.fluent_flags import FluentTimeDiscretization
+from engine.commission_parameters import SubcaseParameters
+from engine.fluent_flags import FluentTimeDiscretization
 import pandas as pd
 
 class TranscriptElaborator:

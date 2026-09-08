@@ -9,9 +9,9 @@ import logging
 import textwrap
 from numpy import ceil
 
-from modules.commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
-from modules.fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType
-from modules.transcript_elaborator import TranscriptElaboratorRuntime
+from engine.commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
+from engine.fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType
+from engine.transcript_elaborator import TranscriptElaboratorRuntime
 
 logger = logging.getLogger(__name__)
 fluent_killer_path: Path =  Path(r"F:\01_FLUENT_SIM\UTILITIES_FLUENT\fluent_killer.bat")

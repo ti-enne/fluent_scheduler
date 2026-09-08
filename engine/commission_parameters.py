@@ -3,7 +3,7 @@ import json
 import regex as re
 from dataclasses import dataclass, field, asdict
 import shutil
-from modules.commission_class import FluentCommission, FluentCase, FluentSubcase
+from engine.commission_class import FluentCommission, FluentCase, FluentSubcase
 import logging
 import textwrap
 

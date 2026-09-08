@@ -11,10 +11,10 @@ import datetime
 import time
 from enum import Enum, auto
 
-from modules.fluent_runner import FluentSolver
-from modules.commission_parameters import CommissionParameters
-from modules.tkinter_GUI.file_selector import FileSelectorGUI
-from modules.tkinter_GUI.simulation_queue_GUI import SimulationQueueGUI 
+from engine.fluent_runner import FluentSolver
+from engine.commission_parameters import CommissionParameters
+from tkinter_GUI.file_selector import FileSelectorGUI
+from tkinter_GUI.simulation_queue_GUI import SimulationQueueGUI 
 
 class MyFormatter(logging.Formatter):
     def format(self, record):

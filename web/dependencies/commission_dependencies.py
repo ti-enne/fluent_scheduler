@@ -1,10 +1,10 @@
 from fastapi import HTTPException, Depends
 
 from config.settings import settings
-from modules import FluentCommission
+from engine import FluentCommission
 
 def all_commission_list() -> list[str]:
-    return [item for item in settings.root_folder.glob("*") if item.is_dir() and settings.commission_regex.search(item.name)]
+    return [item.name for item in settings.root_folder.glob("*") if item.is_dir() and settings.commission_regex.search(item.name)]
 
 def get_commission_or_404(commission_name:str) -> FluentCommission:
     if commission_name not in all_commission_list():

@@ -3,7 +3,7 @@ import json
 
 from config.settings import settings
 from web.schemas import CommissionOut,CommissionParametersOut
-from modules import FluentCommission
+from engine import FluentCommission
 
 router = APIRouter(prefix="/commissions/{commission_name}", tags=["commission"])
 
