@@ -105,7 +105,6 @@ class FluentSubcaseSolver:
         logger.info(f"Setting up {self.subcase._commissioncasesubcase_name}.")
         self.time_discretization = self._build_time_discretization()
         self.spatial_discretization = self._build_spatial_discretization()
-        self._manage_named_expressions()
         self._manage_report_files()
         self._initialize_subcase()
         self.start_time = datetime.datetime.now() #Modifico lo start time della simulazione
@@ -150,6 +149,7 @@ class FluentSubcaseSolver:
             msg = f"No simulations to do for subcase {self.subcase.name}"
             logger.info(msg)
             return
+        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
         self._manage_named_expressions()
         self._manage_report_files()
         self._manage_solution_verbosity()
@@ -157,7 +157,6 @@ class FluentSubcaseSolver:
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
-        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
         self._define_transcript_callback()
         self._manage_residuals()
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path) #To avoid auto-save writing .cas file.
@@ -178,7 +177,9 @@ class FluentSubcaseSolver:
         if equations_dict==None or len(equations_dict)==0:
             return
         for equation_name, equation_definition in equations_dict.items():
-            self.solver.settings.setup.named_expressions[equation_name] = {"definition" : equation_definition}
+            named_expr = self.solver.settings.setup.named_expressions[equation_name]
+            named_expr.definition = equation_definition
+            self.transcript.print_to_fluent_console(f"Modified named expression {equation_name}\nDefinition: {equation_definition}.\nValue from expression evaluation: {named_expr.get_value()}")
     
     def _manage_report_files(self):
         if self.subcase.post_process == False:
