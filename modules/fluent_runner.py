@@ -105,7 +105,6 @@ class FluentSubcaseSolver:
         logger.info(f"Setting up {self.subcase._commissioncasesubcase_name}.")
         self.time_discretization = self._build_time_discretization()
         self.spatial_discretization = self._build_spatial_discretization()
-        self._manage_named_expressions()
         self._manage_report_files()
         self._initialize_subcase()
         self.start_time = datetime.datetime.now() #Modifico lo start time della simulazione
@@ -150,13 +149,14 @@ class FluentSubcaseSolver:
             msg = f"No simulations to do for subcase {self.subcase.name}"
             logger.info(msg)
             return
+        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
         self._manage_named_expressions()
         self._manage_report_files()
         self._manage_solution_verbosity()
+        time_step_size = self._manage_time_step()
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
-        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
         self._define_transcript_callback()
         self._manage_residuals()
         self.solver.settings.file.write(file_type="case", file_name=self.case.cas_file_path) #To avoid auto-save writing .cas file.
@@ -177,7 +177,9 @@ class FluentSubcaseSolver:
         if equations_dict==None or len(equations_dict)==0:
             return
         for equation_name, equation_definition in equations_dict.items():
-            self.solver.settings.setup.named_expressions[equation_name] = {"definition" : equation_definition}
+            named_expr = self.solver.settings.setup.named_expressions[equation_name]
+            named_expr.definition = equation_definition
+            self.transcript.print_to_fluent_console(f"Modified named expression {equation_name}\nDefinition: {equation_definition}.\nValue from expression evaluation: {named_expr.get_value()}")
     
     def _manage_report_files(self):
         if self.subcase.post_process == False:
@@ -204,6 +206,18 @@ class FluentSubcaseSolver:
             
         # self.solver.settings.solution.calculation_activity.solution_animations.clear() #rimuovo tutte le animazioni da Fluent. Danno bug quando modifico il path in cui salvarle tramite script (Il method esiste anche se non viene autocompletato)
     
+    def _manage_time_step(self):
+        #Perchè se leggo il .dat mi viene modificato il time-step in automatico.
+        if  self.time_discretization == FluentTimeDiscretization.STEADY:
+            return
+        try:
+            time_step_size = self.solver.settings.solution.run_calculation.transient_controls.time_step_size()
+        except:
+            time_step_size = None
+            logger.info("No time-step size to read. Skipping.")
+        
+        return time_step_size
+        
     def _manage_auto_save(self):
         auto_save_dict = {
             'root_name': f'./{self.subcase.casesubcase_name}',
@@ -318,7 +332,6 @@ class FluentSubcaseSolver:
             transient_controls.time_step_count = iterations
             return
         
-        transient_controls.cfl_based_time_stepping.courant_number = self.subcase.time_step_size
         duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
         duration_specification = FluentTransientDurationMethod(duration_specification)
         if duration_specification == FluentTransientDurationMethod.TOTAL_TIME:

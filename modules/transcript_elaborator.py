@@ -108,9 +108,9 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         self.subcase = subcase
         self.max_transient_time = max_transient_time
         self.max_film_time = max_film_time
-        if self.subcase.save_img_every in [0,None]:
-            return
+        if self.subcase.save_img_every in [0,None]: return
         img_args = self._setup_save_img()
+        if img_args is None: return
         self._define_save_image_cb_steady(*img_args)
         self._define_save_image_cb_transient(*img_args)
         
