@@ -21,4 +21,4 @@ class GUISettings():
 with SETTINGS_FILE.open("r", encoding="utf-8") as f:
     settings_dict = json.load(f)
 
-settings = GUISettings(**settings_dict)
+SETTINGS = GUISettings(**settings_dict)

@@ -1,1 +1,2 @@
 from .commission_class import FluentCommission
+from .commission_parameters import CommissionParameters
