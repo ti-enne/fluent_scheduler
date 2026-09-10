@@ -9,8 +9,8 @@ from config.settings import SETTINGS
 class SchedulerStateEnum(Enum):
     IDLE = "idle"
     INVALID = "invalid"
-    READY = "ready"
     SELECTED = "selected"
+    READY = "ready"
     RUNNING = "running"
     STOPPED = "stopped"
     COMPLETED = "completed"
@@ -27,13 +27,17 @@ class SchedulerManager:
     state:SchedulerState
     _lock:RLock
     _simulation_thread: threading.Thread | None
-    _stop_event = threading.Event
+    _stop_event : threading.Event
+    _checked_commissions_event : threading.Event
+    commission_dict : dict[str,CommissionParameters]
     
     def __init__(self) -> None:
         self.state = SchedulerState()
         self._lock = RLock()
         self._simulation_thread = None
         self._stop_event = threading.Event()
+        self._checked_commissions_event = threading.Event()
+        self.commission_dict = {}
         
     def list_commissions(self) -> list[dict[str,str]]:
         with self._lock:
@@ -58,24 +62,42 @@ class SchedulerManager:
             self.state.commissions.clear()
             self.state.state = SchedulerStateEnum.SELECTED
             self.state.progress = 0.0
+            self._checked_commissions_event.clear()
+    
+    def deselect_commissions(self, commission_names:list[str]) -> None:
+        with self._lock:
+            available = {name for name in self.state.selected_commission}
+            if not available: raise ValueError(f"At least one commission must be selected previously")
+            unknown = [name for name in commission_names if name not in available]
+            if unknown: raise ValueError(f"Unknown commissions: {", ".join(unknown)}")
+            
+            self.state.selected_commission = [name for name in self.state.selected_commission if name not in commission_names]
+            self.state.commissions.clear()
+            if not self.state.selected_commission: self.state.state = SchedulerStateEnum.IDLE
+            self.state.progress = 0.0
+            self._checked_commissions_event.clear()
     
     def check_commissions(self) -> dict[str, list[str]]:
         with self._lock:
             if not self.state.selected_commission:
                 raise ValueError("No commissions selected.")
             
-            commission_dict: dict[str,CommissionParameters] = {}
+            if self._checked_commissions_event.is_set():
+                raise ValueError("Commissions already checked")
+            
+            self.commission_dict: dict[str,CommissionParameters] = {}
             missing_files: dict[str,list[str]] = {}
             
             for commission_name in self.state.selected_commission:
                 commission = CommissionParameters(commission_name, SETTINGS.root_folder)
-                commission_dict[commission_name] = commission
+                self.commission_dict[commission_name] = commission
                 
                 if commission.missing_files:
                     missing_files[commission_name] = [str(path) for path in commission.missing_files]
                     
-            self.state.commissions = commission_dict
+            self.state.commissions = self.commission_dict
             self.state.state = SchedulerStateEnum.INVALID if missing_files else SchedulerStateEnum.READY
+            self._checked_commissions_event.set()
             
             return missing_files
     

@@ -5,7 +5,7 @@ class CommissionSelectionIn(BaseModel):
 
 class CommissionSelectionOut(BaseModel):
     selected_commissions : list[str]
-
+    
 class CommissionCheckOut(BaseModel):
     state: str
     missing_files: dict[str, list[str]]
