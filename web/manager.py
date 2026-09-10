@@ -3,7 +3,7 @@ from dataclasses import field, dataclass
 from enum import Enum
 import threading
 
-from engine import CommissionParameters
+from engine import CommissionParameters, FluentSolver, SubcaseParameters
 from config.settings import SETTINGS
 
 class SchedulerStateEnum(Enum):
@@ -20,7 +20,7 @@ class SchedulerStateEnum(Enum):
 class SchedulerState:
     selected_commission: list[str] = field(default_factory=list)
     commissions : dict[str,CommissionParameters] = field(default_factory=dict)
-    state : str = SchedulerStateEnum.IDLE
+    state : SchedulerStateEnum = SchedulerStateEnum.IDLE
     progress : float = 0.0
     
 class SchedulerManager:
@@ -30,6 +30,7 @@ class SchedulerManager:
     _stop_event : threading.Event
     _checked_commissions_event : threading.Event
     commission_dict : dict[str,CommissionParameters]
+    cores:int
     
     def __init__(self) -> None:
         self.state = SchedulerState()
@@ -113,7 +114,8 @@ class SchedulerManager:
             self.state.state = SchedulerStateEnum.RUNNING
             self.state.progress = 0.0
             
-            self._simulation_thread = threading.Thread(target=self._run_simulation, name="fluent-simulation", daemon=True)
+            cores = 36
+            self._simulation_thread = threading.Thread(target=self._run_simulation, args=[cores], name="fluent-simulation", daemon=True)
             self._simulation_thread.start()
             
     def stop_simulation(self) -> None:
@@ -122,7 +124,7 @@ class SchedulerManager:
                 raise ValueError("No simulation is currently running")
         self._stop_event.set()
         
-    def _run_simulation(self) -> None:
+    def _run_simulation(self, cores) -> None:
         try:
             for commission_name in self.state.selected_commission:
                 if self._stop_event.is_set():
@@ -134,8 +136,10 @@ class SchedulerManager:
                 if self._stop_event.is_set():
                     break
                 
+                fluent_solver = FluentSolver.start_fluent(case=case, cores=cores)
+                fluent_solver.load_cas()
                 for subcase in case.subcases_to_simulate:
-                    self._run_subcase(commission, case, subcase)
+                    self._run_subcase(subcase)
             
             with self._lock:
                 if self._stop_event.is_set():
@@ -146,8 +150,8 @@ class SchedulerManager:
             with self._lock:
                 self.state.state = SchedulerStateEnum.ERROR
         
-    def _run_subcase(self, commission, case, subcase):
-        raise NotImplementedError
+    def _run_subcase(self, solver:FluentSolver, subcase:SubcaseParameters):
+        subcase_solver = solver.solve_subcase(subcase)
             
     def get_status(self) -> dict:
         with self._lock:

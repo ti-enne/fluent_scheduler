@@ -70,7 +70,7 @@ class FluentSolver:
     def quit_fluent(self):
         self.solver.exit()
         
-    def load_cas(self) -> FluentTimeDiscretization:
+    def load_cas(self):
         logger.info("="*80, extra={"plain":True})
         logger.info(f"Loading case {self.case.parent_commission.name} -> {self.case.name}")
         self.solver.settings.file.read(file_type="case", file_name=self.case.cas_file_path)
