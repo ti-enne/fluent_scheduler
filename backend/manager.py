@@ -22,6 +22,8 @@ class SchedulerState:
     commissions : dict[str,CommissionParameters] = field(default_factory=dict)
     state : SchedulerStateEnum = SchedulerStateEnum.IDLE
     progress : float = 0.0
+    completed_subcases: list[SubcaseParameters] = field(default_factory=list)
+    total_subcases: list[SubcaseParameters] = field(default_factory=list)
     
 class SchedulerManager:
     state:SchedulerState
@@ -59,20 +61,21 @@ class SchedulerManager:
             unknown = [name for name in commission_names if name not in available]
             if unknown: raise ValueError(f"Unknown commissions: {", ".join(unknown)}")
             
-            self.state.selected_commission = list(dict.fromkeys(commission_names))
+            self.state.selected_commission = list(dict.fromkeys(commission_names)) #genero una lista di elementi unici, mantenedo l'ordine della lista di ingresso
             self.state.commissions.clear()
             self.state.state = SchedulerStateEnum.SELECTED
             self.state.progress = 0.0
             self._checked_commissions_event.clear()
     
-    def deselect_commissions(self, commission_names:list[str]) -> None:
+    def deselect_commissions(self, deselected_commission_names:list[str]) -> None:
         with self._lock:
             available = {name for name in self.state.selected_commission}
-            if not available: raise ValueError(f"At least one commission must be selected previously")
-            unknown = [name for name in commission_names if name not in available]
+            if not available: raise ValueError(f"At least one commission must be previously selected")
+            unknown = [name for name in deselected_commission_names if name not in available]
             if unknown: raise ValueError(f"Unknown commissions: {", ".join(unknown)}")
             
-            self.state.selected_commission = [name for name in self.state.selected_commission if name not in commission_names]
+            commission_names = [name for name in self.state.selected_commission if name not in deselected_commission_names]
+            self.state.selected_commission = list(dict.fromkeys(commission_names))
             self.state.commissions.clear()
             if not self.state.selected_commission: self.state.state = SchedulerStateEnum.IDLE
             self.state.progress = 0.0
@@ -86,19 +89,20 @@ class SchedulerManager:
             if self._checked_commissions_event.is_set():
                 raise ValueError("Commissions already checked")
             
-            self.commission_dict: dict[str,CommissionParameters] = {}
+            commission_dict: dict[str,CommissionParameters] = {}
             missing_files: dict[str,list[str]] = {}
             
             for commission_name in self.state.selected_commission:
                 commission = CommissionParameters(commission_name, SETTINGS.root_folder)
-                self.commission_dict[commission_name] = commission
+                commission_dict[commission_name] = commission
                 
                 if commission.missing_files:
                     missing_files[commission_name] = [str(path) for path in commission.missing_files]
                     
-            self.state.commissions = self.commission_dict
+            self.state.commissions = commission_dict
             self.state.state = SchedulerStateEnum.INVALID if missing_files else SchedulerStateEnum.READY
             self._checked_commissions_event.set()
+            self.state.total_subcases = [subcase for commission in commission_dict.values() for case in commission.cases_to_simulate_list for subcase in case.subcases_to_simulate]
             
             return missing_files
     
@@ -152,15 +156,17 @@ class SchedulerManager:
         
     def _run_subcase(self, solver:FluentSolver, subcase:SubcaseParameters):
         subcase_solver = solver.solve_subcase(subcase)
+        self.state.completed_subcases.append(subcase)
+        self.state.progress = len(self.state.completed_subcases) / len(self.state.total_subcases)
             
     def get_status(self) -> dict:
         with self._lock:
-            total_subcases = sum(len(case.subcases_to_simulate) for commission in self.state.commissions.values() for case in commission.cases_to_simulate_list)
+            queued_subcases = [subcase.name for subcase in self.state.total_subcases if subcase not in self.state.completed_subcases]
             return {
                 "state" : self.state.state,
                 "selected_commissions":(self.state.selected_commission.copy()),
                 "progress" : self.state.progress,
-                "total_subcases" : total_subcases
+                "total_subcases" : self.state.total_subcases
             }
             
     

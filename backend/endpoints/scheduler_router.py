@@ -3,8 +3,8 @@ import os
 from pathlib import Path
 import subprocess
 
-from web.dependencies import simulation_manager
-from web.schemas import CommissionSelectionIn, CommissionSelectionOut, CommissionCheckOut, SchedulerStatus, CommissionDeselectionOut
+from backend.dependencies import simulation_manager
+from backend.schemas import CommissionSelectionIn, CommissionSelectionOut, CommissionCheckOut, SchedulerStatus
 
 router = APIRouter(prefix="/scheduler", tags=["scheduler"])
 
