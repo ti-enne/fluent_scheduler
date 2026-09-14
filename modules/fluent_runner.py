@@ -105,6 +105,7 @@ class FluentSubcaseSolver:
         logger.info(f"Setting up {self.subcase._commissioncasesubcase_name}.")
         self.time_discretization = self._build_time_discretization()
         self.spatial_discretization = self._build_spatial_discretization()
+        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
         self._manage_report_files()
         self._initialize_subcase()
         self.start_time = datetime.datetime.now() #Modifico lo start time della simulazione
@@ -113,7 +114,10 @@ class FluentSubcaseSolver:
         self._export_to_cfd_post()
 
     def _manage_convergence_conditions(self, active:bool=True)->None:
-        logger.debug(f"Setting convergence conditions to active={active}")
+        equations = self.solver.settings.solution.controls.equations
+        if all(item==False for item in equations().values()):
+            active = False
+        self.transcript.print_to_fluent_console(f"Setting convergence conditions to active={active}")
         convergence_conditions = self.solver.settings.solution.monitor.convergence_conditions.convergence_reports
         if len(convergence_conditions())==0:
             return
@@ -149,11 +153,10 @@ class FluentSubcaseSolver:
             msg = f"No simulations to do for subcase {self.subcase.name}"
             logger.info(msg)
             return
-        self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, subcase=self.subcase, max_film_time=5, max_transient_time=5)
+        self.transcript.define_image_callbacks()
         self._manage_named_expressions()
         self._manage_report_files()
         self._manage_solution_verbosity()
-        time_step_size = self._manage_time_step()
         self._manage_auto_save()
         self._manage_UDS_equations()
         self._start_transcript()
@@ -186,37 +189,36 @@ class FluentSubcaseSolver:
             return
         #Gestione dei report files
         report_files = self.solver.settings.solution.monitor.report_files
-        for rp_file in report_files().keys():
-            report_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}_{rp_file}-rfile.out"
+        for rp_file_name in report_files().keys():
+            report_file_path = self.case.folder_path / f"{self.subcase.casesubcase_name}_{rp_file_name}-rfile.out"
             try:
                 s2t.send2trash(report_file_path)
             except:
                 pass
-            report_files[rp_file]={
+            report_files[rp_file_name]={
                 "file_name" : report_file_path,
                 "active" : True
             }
+            self.transcript.print_to_fluent_console(f"Modified report file {rp_file_name} path: {report_file_path}")
     
     def _manage_solution_verbosity(self):
         #attivo il verbosity se sto utilizzando lo pseudo_time self.solver
         try:
             self.solver.settings.solution.run_calculation.pseudo_time_settings.verbosity = 1
         except:
-            print("Verbosity not active. No info on time-step will be provided")
-            
-        # self.solver.settings.solution.calculation_activity.solution_animations.clear() #rimuovo tutte le animazioni da Fluent. Danno bug quando modifico il path in cui salvarle tramite script (Il method esiste anche se non viene autocompletato)
-    
-    def _manage_time_step(self):
-        #Perchè se leggo il .dat mi viene modificato il time-step in automatico.
-        if  self.time_discretization == FluentTimeDiscretization.STEADY:
-            return
-        try:
-            time_step_size = self.solver.settings.solution.run_calculation.transient_controls.time_step_size()
-        except:
-            time_step_size = None
-            logger.info("No time-step size to read. Skipping.")
+            self.transcript.print_to_fluent_console("Verbosity not active. No info on time-step will be provided")
+                
+    # def _manage_time_step(self):
+    #     #Perchè se leggo il .dat mi viene modificato il time-step in automatico.
+    #     if  self.time_discretization == FluentTimeDiscretization.STEADY:
+    #         return
+    #     try:
+    #         time_step_size = self.solver.settings.solution.run_calculation.transient_controls.time_step_size()
+    #     except:
+    #         time_step_size = None
+    #         logger.info("No time-step size to read. Skipping.")
         
-        return time_step_size
+    #     return time_step_size
         
     def _manage_auto_save(self):
         auto_save_dict = {
@@ -234,6 +236,7 @@ class FluentSubcaseSolver:
                 'max_files': 1 # numero max di file recenti
             }
             auto_save_dict = auto_save_dict | steady_autosave_dict
+            self.transcript.print_to_fluent_console(f"Autosaving data file every {every_n_iter}")
         
         self.solver.settings.file.auto_save = auto_save_dict
     
@@ -243,7 +246,7 @@ class FluentSubcaseSolver:
         if not hasattr(self, "_uds_equations"):
             self._uds_equations = [item for item in equations().keys() if re.search(r"uds", item)]
             if len(self._uds_equations)==0:
-                logger.info("No UDS to solve or manage")
+                self.transcript.print_to_fluent_console(f"No UDS to solve or manage.")
         if not self._uds_equations:
             return []
         for eq in equations:
@@ -317,6 +320,7 @@ class FluentSubcaseSolver:
                         "relative_criteria" : value[1],
                     }
         
+        self.transcript.print_to_fluent_console("Modifying residuals convergence criteria.")
         return
 
     def _setup_transient_controls(self, iterations:int) -> None:
@@ -412,11 +416,12 @@ class FluentSubcaseSolver:
         if len(self._uds_equations)==0:
             return []
         self._manage_UDS_equations(active=True)
+        self.transcript.print_to_fluent_console(f"Disabled main equations and enabled UDS. Solving UDS equations.")
+        logger.info("Solving UDS equations")
         discretization_schemes = self.solver.settings.solution.methods.spatial_discretization.discretization_scheme
         uds_equation_names = [item for item in discretization_schemes() if item.startswith("uds")]
         for eq in uds_equation_names:
             discretization_schemes[eq] = FluentSpatialSchemes.SECOND_ORDER_UW.value
-        logger.info("Solving UDS equations")
         if iter > self.subcase.second_order_iterations:
             iter = self.subcase.second_order_iterations
         self.solver.settings.solution.run_calculation.iter_count = iter

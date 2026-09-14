@@ -108,11 +108,6 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         self.subcase = subcase
         self.max_transient_time = max_transient_time
         self.max_film_time = max_film_time
-        if self.subcase.save_img_every in [0,None]: return
-        img_args = self._setup_save_img()
-        if img_args is None: return
-        self._define_save_image_cb_steady(*img_args)
-        self._define_save_image_cb_transient(*img_args)
         
     def print_to_fluent_console(self, msg:str):
         self.solver.scheme.eval(f'(display "!!!FROM PYTHON SCRIPT: {msg}\n")')
@@ -187,6 +182,13 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_iteration_end)
         return cbid    
     
+    def define_image_callbacks(self):
+        if self.subcase.save_img_every in [0,None]: return
+        img_args = self._setup_save_img()
+        if img_args is None: return
+        self._define_save_image_cb_steady(*img_args)
+        self._define_save_image_cb_transient(*img_args)
+        
     def _stop_simulation(self, actual_time:float, max_time:float):
         if max_time == None:
             return
