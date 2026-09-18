@@ -78,6 +78,8 @@ class FluentSolver:
         self.solver.settings.file.batch_options.confirm_overwrite = False #Enable auto-confirm on solver prompt
         self.residuals = self.solver.settings.solution.monitor.residual
         self.solver.chdir(str(self.case.folder_path.absolute()))
+        self.solver.settings.file.batch_options.hide_answer =True
+        self.solver.settings.file.batch_options.confirm_overwrite=True
 
     def solve_subcase(self, subcase:SubcaseParameters):
         subcase_solver = FluentSubcaseSolver(fluent_solver=self, subcase=subcase)
