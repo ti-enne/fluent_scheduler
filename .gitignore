@@ -3,6 +3,7 @@
 tree.txt
 .vscode
 pyfluent_watchdog*
+test
 
 # Byte-compiled / optimized / DLL files
 __pycache__/
