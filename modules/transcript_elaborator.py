@@ -2,15 +2,15 @@ import regex as re
 from pathlib import Path
 from ansys.fluent.core.session_solver import Solver
 import ansys.fluent.core as pyfluent
-from modules.commission_parameters import SubcaseParameters
-from modules.fluent_flags import FluentTimeDiscretization
 import pandas as pd
+
+from .commission_parameters import SubcaseParameters
+from .fluent_flags import FluentTimeDiscretization
 
 class TranscriptElaborator:
     column_values : list[dict[str,float]]
     _column_names : list[str]
     _pending_line : dict[str,float]
-    _time_discretization : FluentTimeDiscretization
     
     def __init__(self) -> None:
         self._pending_line = {}
@@ -87,12 +87,28 @@ class TranscriptElaborator:
         self.add_to_pending(results_dict)
         return results_dict["film_time"]
     
-        
+    def get_df(self) -> pd.DataFrame:
+        df = pd.DataFrame(self.column_values+[self._pending_line])
+        return df
+    
     def export_to_csv(self, save_path:Path):
         self.column_values.append(self._pending_line)
-        df = pd.DataFrame(self.column_values)
+        df = self.get_df()
         df.to_csv(save_path, index=False)
         
+    @classmethod
+    def from_file(cls, file_path:Path) -> "TranscriptElaborator":
+        if not file_path.exists():
+            raise ValueError(f"{file_path.absolute()} do not exists.")
+        with open(file_path) as f:
+            lines = f.readlines()
+        if not re.search(r"Transcript Start Time",lines[0]):
+            print("WARNING: The file given doesn't seems to be a Fluent transcript file.")
+        transcript = cls()
+        for line in lines:
+            transcript.elaborate_msg(line)
+        return transcript
+    
 class TranscriptElaboratorRuntime(TranscriptElaborator):
     solver : Solver
     time_discretization : FluentTimeDiscretization
@@ -138,6 +154,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         if self.time_discretization != FluentTimeDiscretization.STEADY:
             return
         
+        # film_time = [x for x in self.solver.rp_vars("wall-film/solution-state") if "elapsed_time" in x[0]][0][1]
         graphics = self.solver.settings.results.graphics
         def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
             if event_info.index % self.subcase.save_img_every !=0:
@@ -161,7 +178,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         graphics = self.solver.settings.results.graphics
         self.total_time = self.solver.rp_vars("flow-time")
         self._next_image_time = self.total_time + (self.subcase.save_img_every - self.total_time % self.subcase.save_img_every)
-        def on_iteration_end(session, event_info:pyfluent.TimestepEndedEventInfo):
+        def on_timestep_end(session, event_info:pyfluent.TimestepEndedEventInfo):
             self.total_time = self.solver.rp_vars("flow-time")
             if self.total_time<self._next_image_time:
                 # self.print_to_fluent_console(f'Flow time is {self.total_time} and next save time is {self._next_image_time}, skipping')
@@ -179,7 +196,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
                     graphics.picture.save_picture(file_name=save_path.absolute())
             self._next_image_time += self.subcase.save_img_every
 
-        cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_iteration_end)
+        cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_timestep_end)
         return cbid    
     
     def define_image_callbacks(self):
@@ -199,7 +216,10 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         i=0
         while(i<5):
             if self.solver != None:
-                self.solver.execute_tui("(cx-interrupt)")
+                try:
+                    self.solver.execute_tui("(cx-interrupt)")
+                except Exception:
+                    print("Calculation stopped")
             i = i + 1
 
     def _get_transient_flow_info(self, msg: str):
