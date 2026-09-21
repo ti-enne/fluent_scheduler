@@ -458,6 +458,7 @@ class FluentSubcaseSolver:
         
         self.transcript.export_to_csv()
         self.fluent_run.elaborate_out_log_files()
+        self.fluent_run.generate_plot_imgs()
         try:
             with open(log_file_path, "a") as f:
                 f.write(f"{self.fluent_run.name}\t{self.end_time}\t{self.subcase_params.casesubcase_name}\tdurata simulazione: {self.simulation_time}\tnumero di core: {self.fluent_solver.cores}\n")
