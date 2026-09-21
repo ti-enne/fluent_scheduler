@@ -14,9 +14,15 @@ def remove_file_extension(string:str) -> str:
     return string.split(".")[0]
 
 class FluentCommission:
+    name:str
+    missing_files: list[Path]
+    folder_path:Path
+    cases_list:list["FluentCase"]
+    cases_dict:dict[str,"FluentCase"]
+    
     def __init__(self, name : str, root_path : Path = Path(r"F:\01_FLUENT_SIM")):
         self.name = name
-        self.missing_files : list[Path] = []
+        self.missing_files = []
         self.folder_path = self._build_folder_path(root_path)
         self.cases_list = self._build_cases_list()
         self.cases_dict = {case.name : case for case in self.cases_list}
@@ -151,6 +157,15 @@ class FluentSubcase:
         return int(re.search(r"run(\d+)", path.name).group(1))
     
 class FluentRun:
+    path:Path
+    parent_subcase:FluentSubcase
+    parent_case:FluentCase
+    parent_commission:FluentCommission
+    index:int
+    name:str
+    out_files_dict:dict[str,OutFileElaborated]
+    log_file:LogFileElaborated
+    
     def __init__(self, run_path:Path, parent_subcase:FluentSubcase):
         if run_path==None:
             return None
@@ -160,6 +175,7 @@ class FluentRun:
         self.parent_commission = self.parent_case.parent_commission
         self.index = self._build_run_number()
         self.name = self._build_run_name()
+        self.elaborate_out_log_files()
     
     @cached_property
     def _commissioncasesubcase_name(self):
@@ -232,15 +248,14 @@ class FluentRun:
         name = name.replace("-rfile", "")
         return name
     
-    def _check_folders_existance(self):
-        if not self.path:
-            logger.error(f"No run folders for {self._commissioncasesubcase_name}")
-            return
+    # def _check_folders_existance(self):
+    #     if not self.path:
+    #         logger.error(f"No run folders for {self._commissioncasesubcase_name}")
+    #         return
     
     def elaborate_out_log_files(self):
         self.out_files_dict = self._build_out_files_dict(research_path=self.path)
         self.log_file = self._build_log_file(research_path=self.path)
-        self.generate_plot_imgs()
     
     def _build_out_files_dict(self, research_path:Path=None) -> dict[str,OutFileElaborated]:
         out_files_dict = self._file_list_generator(research_path=research_path, file_extension_list=[".out"])

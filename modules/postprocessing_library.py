@@ -8,9 +8,14 @@ from numpy import ceil
 logger = logging.getLogger("postprocessing_library")
 
 class OutFileElaborated:
+    path:Path
+    parent_subcase_name:str
+    name:str
+    dataframe:pd.DataFrame
+    
     def __init__(self, path:Path):
         self.path = path
-        self.parent_name = self.path.parent.name
+        self.parent_subcase_name = self.path.parent.name
         file_lines = self._build_file_lines()
         self.name = file_lines[0].replace('"','').replace("\n","")
         self.dataframe = self._build_dataframe(file_lines)
@@ -24,7 +29,7 @@ class OutFileElaborated:
         column_headers = re.findall(r'"(.*?)"', file_lines[2])
         dataframe = pd.read_csv(self.path, sep=r"\s+", skipinitialspace=True, skiprows=[0,1], engine="python", quotechar="'")
         dataframe.dropna(axis=1,how="all", inplace=True)
-        dataframe.columns = column_headers
+        dataframe.columns = [column.lower().replace(" ","_") for column in column_headers]
         if "flow-time" in dataframe.columns: dataframe.drop(labels="flow-time", axis= 1, inplace=True)
         return dataframe
     
@@ -94,10 +99,15 @@ class OutFileElaborated:
         return ax
 
 class LogFileElaborated:
+    path:Path
+    parent_subcase_name:str
+    dataframes_dict: dict[str,pd.DataFrame]
+    
+    
     def __init__(self, path:Path):
         self.path = path
-        self.parent_name = self.path.parent.name
-        self.dataframes_dict : dict[str,pd.DataFrame] = {}
+        self.parent_subcase_name = self.path.parent.name
+        self.dataframes_dict = {}
         full_file = self._build_full_file()
         file_lines = full_file.split("\n")
         self.residuals_dataframe = self._build_residuals_dataframe(full_file, file_lines)
@@ -126,7 +136,7 @@ class LogFileElaborated:
     def _build_pseudo_dt_dataframe(self, file_lines:list[str]) -> pd.DataFrame|None:
         pseudo_dt_lines = [float(re.search(r"(?<=\s*Automatic.*=\s*)\d+\.\d+e(\+|\-)\d+", line).group()) for line in file_lines if bool(re.search(r"^\s*Automatic.*=\s*",line))]
         if not pseudo_dt_lines:
-            logger.debug(f"No info about pseudo-dt available for {self.parent_name}. Corresponding dataframe will not be created.")
+            logger.debug(f"No info about pseudo-dt available for {self.parent_subcase_name}. Corresponding dataframe will not be created.")
             return None
         pseudo_dt_df = pd.DataFrame(pseudo_dt_lines, columns=["Pseudo time-step [s]"])
         self.dataframes_dict["Pseudo_dt"] = pseudo_dt_df
@@ -136,7 +146,7 @@ class LogFileElaborated:
     def _build_radiosity_dataframe(self, full_file:str) -> pd.DataFrame|None:
         matched_text = re.findall(r"(^\s+\d+(.*\n){1,5}^Final radiosity.*$)", full_file, flags=re.MULTILINE) #estraggo tutte le linee che comprendono info sulla radiosity e relativo numero di iterazione
         if not matched_text:
-            logger.debug(f"No info about radiosity available for {self.parent_name}. Corresponding dataframe will not be created.")
+            logger.debug(f"No info about radiosity available for {self.parent_subcase_name}. Corresponding dataframe will not be created.")
             return None
         iteration_number_list = []
         radiosity_iterations_list = [] 
