@@ -93,29 +93,54 @@ class TranscriptElaborator:
         return results_dict["film_time"]
     
     def update_df(self) -> pd.DataFrame:
+        # self.column_values.append(self._pending_line)
         self.df = pd.DataFrame(self.column_values+[self._pending_line])
     
     def export_to_csv(self):
-        self.column_values.append(self._pending_line)
         self.update_df()
         save_path = self.fluent_run.path / f"{self.fluent_run.parent_subcase.casesubcase_name}_transcript_df.csv"
         self.df.to_csv(save_path, index=False)
         
-    # def compose_df(self) -> pd.DataFrame:
-    #     subcase.runs_list 
-    #     pass
+    def compose_df(self) -> tuple[pd.DataFrame, list[int]]:
+        qty_name, fluent_run = next(iter(self.fluent_run.out_files_dict.items()), None)
+        df = fluent_run.dataframe
+        if df.empty:
+            return
+        
+        first_iter = df.iloc[0,0]
+        if first_iter <= 1 or self.fluent_run.index==1:
+            return self.df
+        
+        runs_list = self.fluent_run.parent_subcase.get_runs_list()
+        composed_df = self.df
+        from_runs = [self.fluent_run.index]
+        for run in reversed(runs_list):
+            if run.index >= self.fluent_run.index:
+                continue
+            
+            prev_df = run.out_files_dict[qty_name].dataframe
+            last_iter = prev_df.iloc[-1,0]
+            if first_iter not in [last_iter, last_iter+1]:
+                continue
+            
+            first_iter = prev_df.iloc[0,0]
+            composed_df = pd.concat([TranscriptElaborator.from_fluent_run(run).df, composed_df])
+            from_runs.append(run.index)
+            if first_iter <=1:
+                break
+            
+        return composed_df, from_runs
     
     @classmethod
-    def from_file(cls, file_path:Path) -> "TranscriptElaborator":
-        if not file_path.exists():
-            raise ValueError(f"{file_path.absolute()} do not exists.")
-        with open(file_path) as f:
+    def from_fluent_run(cls, fluent_run:FluentRun) -> "TranscriptElaborator":
+        with open(fluent_run.log_file.path) as f:
             lines = f.readlines()
         if not re.search(r"Transcript Start Time",lines[0]):
             print("WARNING: The file given doesn't seems to be a Fluent transcript file.")
-        transcript = cls()
+        transcript = cls(fluent_run)
         for line in lines:
             transcript.elaborate_msg(line)
+        transcript.update_df()
         return transcript
     
 class TranscriptElaboratorRuntime(TranscriptElaborator):
@@ -139,7 +164,6 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
 
     def _setup_save_img(self) -> tuple[Path,list[str]]:
         graphics = self.solver.settings.results.graphics
-        base_path = self.fluent_run.path / "animations"
         contour_list = [item for item in graphics.contour().keys() if "-animation" in item]
         if not contour_list:
             print("No countours to save animations from")
@@ -149,6 +173,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
             return
         
         self.solver.tui.display.set.rendering_options.driver("null")
+        base_path = self.fluent_run.path / "animations"
         if not base_path.exists(): base_path.mkdir()
         graphics.picture = {
                 "invert_background" : True,
