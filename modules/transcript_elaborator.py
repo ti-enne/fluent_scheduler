@@ -5,17 +5,22 @@ import ansys.fluent.core as pyfluent
 import pandas as pd
 
 from .commission_parameters import SubcaseParameters
+from .commission_class import FluentRun
 from .fluent_flags import FluentTimeDiscretization
 
 class TranscriptElaborator:
     column_values : list[dict[str,float]]
     _column_names : list[str]
     _pending_line : dict[str,float]
+    fluent_run: FluentRun
+    df: pd.DataFrame
     
-    def __init__(self) -> None:
+    def __init__(self, fluent_run:FluentRun) -> None:
         self._pending_line = {}
         self.column_values = []
         self._column_names = []
+        self.fluent_run = fluent_run
+        self.df = pd.DataFrame()
     
     def elaborate_msg(self, msg:str):
         msg = msg.strip()
@@ -87,15 +92,19 @@ class TranscriptElaborator:
         self.add_to_pending(results_dict)
         return results_dict["film_time"]
     
-    def get_df(self) -> pd.DataFrame:
-        df = pd.DataFrame(self.column_values+[self._pending_line])
-        return df
+    def update_df(self) -> pd.DataFrame:
+        self.df = pd.DataFrame(self.column_values+[self._pending_line])
     
-    def export_to_csv(self, save_path:Path):
+    def export_to_csv(self):
         self.column_values.append(self._pending_line)
-        df = self.get_df()
-        df.to_csv(save_path, index=False)
+        self.update_df()
+        save_path = self.fluent_run.path / f"{self.fluent_run.parent_subcase.casesubcase_name}_transcript_df.csv"
+        self.df.to_csv(save_path, index=False)
         
+    # def compose_df(self) -> pd.DataFrame:
+    #     subcase.runs_list 
+    #     pass
+    
     @classmethod
     def from_file(cls, file_path:Path) -> "TranscriptElaborator":
         if not file_path.exists():
@@ -113,29 +122,29 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
     solver : Solver
     time_discretization : FluentTimeDiscretization
     callback_list : list[str]
-    subcase : SubcaseParameters
+    subcase_params : SubcaseParameters
     max_transient_time : float
     max_film_time : float
     
-    def __init__(self, solver:Solver, time_discretization:FluentTimeDiscretization, subcase:SubcaseParameters, max_transient_time:float=None, max_film_time:float=None) -> None:
-        super().__init__()
+    def __init__(self, solver:Solver, fluent_run:FluentRun, time_discretization:FluentTimeDiscretization, subcase_params:SubcaseParameters, max_transient_time:float=None, max_film_time:float=None) -> None:
+        super().__init__(fluent_run=fluent_run)
         self.solver = solver
         self.time_discretization = time_discretization
-        self.subcase = subcase
         self.max_transient_time = max_transient_time
         self.max_film_time = max_film_time
+        self.subcase_params = subcase_params
         
     def print_to_fluent_console(self, msg:str):
         self.solver.scheme.eval(f'(display "!!!FROM PYTHON SCRIPT: {msg}\n")')
 
     def _setup_save_img(self) -> tuple[Path,list[str]]:
         graphics = self.solver.settings.results.graphics
-        base_path = self.subcase.parent_case.folder_path / "animations"
+        base_path = self.fluent_run.path / "animations"
         contour_list = [item for item in graphics.contour().keys() if "-animation" in item]
         if not contour_list:
             print("No countours to save animations from")
             return
-        if not self.subcase.view_list:
+        if not self.subcase_params.view_list:
             print("No views to save animations from")
             return
         
@@ -157,13 +166,13 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         # film_time = [x for x in self.solver.rp_vars("wall-film/solution-state") if "elapsed_time" in x[0]][0][1]
         graphics = self.solver.settings.results.graphics
         def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
-            if event_info.index % self.subcase.save_img_every !=0:
+            if event_info.index % self.subcase_params.save_img_every !=0:
                 return
             for contour_name in contour_list:
                 self.print_to_fluent_console(f'Saving images for contour {contour_name}, iteration: {event_info.index}')
                 graphics.contour[contour_name].display()
-                for view_name in self.subcase.view_list:
-                    save_path = base_save_path / f"{self.subcase.casesubcase_name}_{contour_name}_{view_name}_iter{event_info.index}"
+                for view_name in self.subcase_params.view_list:
+                    save_path = base_save_path / f"{self.subcase_params.casesubcase_name}_{contour_name}_{view_name}_iter{event_info.index}"
                     graphics.views.restore_view(view_name=view_name)
                     graphics.views.auto_scale()
                     graphics.picture.save_picture(file_name=save_path.absolute())
@@ -177,7 +186,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         
         graphics = self.solver.settings.results.graphics
         self.total_time = self.solver.rp_vars("flow-time")
-        self._next_image_time = self.total_time + (self.subcase.save_img_every - self.total_time % self.subcase.save_img_every)
+        self._next_image_time = self.total_time + (self.subcase_params.save_img_every - self.total_time % self.subcase_params.save_img_every)
         def on_timestep_end(session, event_info:pyfluent.TimestepEndedEventInfo):
             self.total_time = self.solver.rp_vars("flow-time")
             if self.total_time<self._next_image_time:
@@ -187,20 +196,20 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
             for contour_name in contour_list:
                 self.print_to_fluent_console(f'Saving images for contour {contour_name}, time: {self.total_time}')
                 graphics.contour[contour_name].display()
-                for view_name in self.subcase.view_list:
+                for view_name in self.subcase_params.view_list:
                     total_time_str = f"{self.total_time:.2e}".replace(".","d")
                     contour_name_edited = contour_name.replace("-animation","") #some names could be too long to be saved.
-                    save_path = base_save_path / f"{self.subcase.casesubcase_name}_{contour_name_edited}_{view_name}_time{total_time_str}s"
+                    save_path = base_save_path / f"{self.subcase_params.casesubcase_name}_{contour_name_edited}_{view_name}_time{total_time_str}s"
                     graphics.views.restore_view(view_name=view_name)
                     graphics.views.auto_scale()
                     graphics.picture.save_picture(file_name=save_path.absolute())
-            self._next_image_time += self.subcase.save_img_every
+            self._next_image_time += self.subcase_params.save_img_every
 
         cbid = self.solver.events.register_callback(pyfluent.SolverEvent.TIMESTEP_ENDED, on_timestep_end)
         return cbid    
     
     def define_image_callbacks(self):
-        if self.subcase.save_img_every in [0,None]: return
+        if self.subcase_params.save_img_every in [0,None]: return
         img_args = self._setup_save_img()
         if img_args is None: return
         self._define_save_image_cb_steady(*img_args)

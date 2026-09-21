@@ -5,7 +5,7 @@ import matplotlib.pyplot as plt
 import pandas as pd
 from functools import cached_property
 import shutil
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from .postprocessing_library import OutFileElaborated, LogFileElaborated
 
 logger = logging.getLogger("commission_class")
@@ -101,26 +101,14 @@ class FluentSubcase:
     name : str = None
     _commissioncasesubcase_name : str = None
     casesubcase_name : str = None
+    _runs_list : list["FluentRun"] = field(default_factory=list)
+    _latest_run : "FluentRun" = None
     
     def __post_init__(self):
         self.name = self._build_name()
         self.parent_commission = self.parent_case.parent_commission
         self._commissioncasesubcase_name = self._build_commissioncasesubcase_name()
         self.casesubcase_name = self._build_casesubcase_name()
-    
-    @cached_property
-    def runs_list(self) -> list["FluentRun"]:
-        run_folder_list = self._get_run_folder_list()
-        runs_list = [FluentRun(run_path=path, parent_subcase=self) for path in run_folder_list]
-        return runs_list
-    
-    @cached_property
-    def latest_run(self) -> "FluentRun":
-        run_folder_list = self._get_run_folder_list()
-        if not run_folder_list:
-            return
-        self.latest_run = FluentRun(run_path=run_folder_list[-1], parent_subcase=self)
-        return self.latest_run
     
     def _get_run_folder_list(self) -> list[Path]:
         run_folder_list = [item for item in self.parent_case.runs_archive_path.iterdir() if item.is_dir() and re.search(f"{self.parent_case.name}_{self.name}_run", item.name)]
@@ -129,6 +117,24 @@ class FluentSubcase:
             return []
         run_folder_list.sort(key=lambda x: self._extract_run_value(x))
         return run_folder_list
+    
+    def get_runs_list(self) -> list["FluentRun"]:
+        run_folder_list = self._get_run_folder_list()
+        new_runs_path = [
+            run_path for run_path in run_folder_list 
+            if not any([run_path==run.path for run in self._runs_list])
+            ]
+        self._runs_list = self._runs_list + [FluentRun(run_path=path, parent_subcase=self) for path in new_runs_path]
+        return self._runs_list
+    
+    def get_latest_run(self) -> "FluentRun":
+        run_folder_list = self._get_run_folder_list()
+        if not run_folder_list:
+            return
+        if self._latest_run != None and run_folder_list[-1] == self._latest_run.path:
+            return self._latest_run
+        self._latest_run = FluentRun(run_path=run_folder_list[-1], parent_subcase=self)
+        return self._latest_run
     
     def _build_commissioncasesubcase_name(self) -> str:
         return f"{self.parent_commission.name} -> {self.parent_case.name} -> {self.name}"
@@ -143,22 +149,36 @@ class FluentSubcase:
         
     def _extract_run_value(self, path:Path) -> int:
         return int(re.search(r"run(\d+)", path.name).group(1))
-
-    def generate_new_run(self) -> "FluentRun":
-        if self.latest_run != None:
-            new_run = self.latest_run.index + 1
+    
+class FluentRun:
+    def __init__(self, run_path:Path, parent_subcase:FluentSubcase):
+        if run_path==None:
+            return None
+        self.path = run_path
+        self.parent_subcase = parent_subcase
+        self.parent_case = parent_subcase.parent_case
+        self.parent_commission = self.parent_case.parent_commission
+        self.index = self._build_run_number()
+        self.name = self._build_run_name()
+    
+    @cached_property
+    def _commissioncasesubcase_name(self):
+        return self.parent_subcase._commissioncasesubcase_name
+    
+    @cached_property
+    def _casesubcase_name(self):
+        return self.parent_subcase.casesubcase_name
+    
+    @classmethod
+    def generate_new_run(cls, subcase:FluentSubcase) -> "FluentRun":
+        latest_run = subcase.get_latest_run()
+        if latest_run!= None:
+            new_run = latest_run.index + 1
         else:
             new_run = 1
-        new_path = self.parent_case.runs_archive_path / f"{self.casesubcase_name}_run{new_run}"
+        new_path = subcase.parent_case.runs_archive_path / f"{subcase.casesubcase_name}_run{new_run}"
         new_path.mkdir()
-        
-        files_to_copy = self._file_list_generator(research_path=self.parent_case.folder_path, file_extension_list=[".out", "log.txt", ".flsettings"])
-        for file in files_to_copy:
-            new_file_path = new_path / file.name
-            shutil.copy2(file, new_file_path)
-        
-        new_run = FluentRun(run_path=new_path, parent_subcase=self)
-        new_run.generate_plot_imgs()
+        new_run = cls(run_path=new_path, parent_subcase=subcase)
         return new_run
 
     def _file_list_generator(self, research_path:Path, file_extension_list:list[str]) -> list[Path]:
@@ -187,34 +207,19 @@ class FluentSubcase:
                 add_str = "_"
             else:
                 add_str = ""
-            pattern = re.compile(fr"{self.casesubcase_name}{add_str}{re.escape(file_ext)}$")
+            pattern = re.compile(fr"{self.parent_subcase.casesubcase_name}{add_str}{re.escape(file_ext)}$")
             lista = lista + [item for item in research_path.iterdir() if pattern.search(item.name)]
             
         if not lista:
-            logger.error(f"No {' or '.join(file_extension_list)} files to copy for {self._commissioncasesubcase_name}")
+            logger.error(f"No {' or '.join(file_extension_list)} files to copy for {self.parent_subcase._commissioncasesubcase_name}")
             # raise FileNotFoundError
         return filter_for_most_recent_file(lista)
-
-class FluentRun:
-    def __init__(self, run_path:Path, parent_subcase:FluentSubcase):
-        if run_path==None:
-            return None
-        self.path = run_path
-        self.parent_subcase = parent_subcase
-        self.parent_case = parent_subcase.parent_case
-        self.parent_commission = self.parent_case.parent_commission
-        self.index = self._build_run_number()
-        self.name = self._build_run_name()
-        self.out_files_dict = self._build_out_files_dict(research_path=self.path)
-        self.log_file = self._build_log_file(research_path=self.path)
     
-    @cached_property
-    def _commissioncasesubcase_name(self):
-        return self.parent_subcase._commissioncasesubcase_name
-    
-    @cached_property
-    def _casesubcase_name(self):
-        return self.parent_subcase.casesubcase_name
+    def copy_from_master_dir(self):
+        files_to_copy = self._file_list_generator(research_path=self.parent_case.folder_path, file_extension_list=[".out", "log.txt", ".flsettings"])
+        for file in files_to_copy:
+            new_file_path = self.path / file.name
+            shutil.copy2(file, new_file_path)
     
     def _build_run_name(self) -> str:
         return self.path.name
@@ -232,8 +237,13 @@ class FluentRun:
             logger.error(f"No run folders for {self._commissioncasesubcase_name}")
             return
     
+    def elaborate_out_log_files(self):
+        self.out_files_dict = self._build_out_files_dict(research_path=self.path)
+        self.log_file = self._build_log_file(research_path=self.path)
+        self.generate_plot_imgs()
+    
     def _build_out_files_dict(self, research_path:Path=None) -> dict[str,OutFileElaborated]:
-        out_files_dict = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=[".out"])
+        out_files_dict = self._file_list_generator(research_path=research_path, file_extension_list=[".out"])
         if not out_files_dict:
             return []
         out_files_dict = [OutFileElaborated(item) for item in out_files_dict]
@@ -241,7 +251,7 @@ class FluentRun:
         return out_files_dict
     
     def _build_log_file(self, research_path:Path=None) -> LogFileElaborated:
-        log_file = self.parent_subcase._file_list_generator(research_path=research_path, file_extension_list=["log.txt"])
+        log_file = self._file_list_generator(research_path=research_path, file_extension_list=["log.txt"])
         if not log_file:
             return None
         log_file = LogFileElaborated(log_file[0])
@@ -270,9 +280,3 @@ class FluentRun:
     def generate_plot_imgs(self):
         self.out_files_plotter()
         self.log_files_plotter()
-
-
-if __name__=="__main__":
-    commessa = "D4P26I0022-CFD_DIFFUSORE_ARIA_IMPERMEABILIZZANTE_CELLULOSA"
-    commessa = FluentCommission(commessa)
-    pass
