@@ -85,6 +85,6 @@ class SteadyConvergence():
         return(
             current["mean_change_rel"] < mean_tolerance and
             current["std_change_rel"] < std_tolerance and
-            current["trend"] < trend_tolerance
+            abs(current["trend"]) < trend_tolerance
         )
         
