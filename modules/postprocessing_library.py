@@ -37,8 +37,8 @@ class OutFileElaborated:
     def _convert_name_to_axis_label(title:str) -> str:
         if bool(re.search(r"deltap", title)):
             axis_label = "delta P [Pa]"
-        elif bool(re.search(r"mass_flow", title)):
-            axis_label = "Mass flow [kg/s]"
+        elif bool(re.search(r"mass_flow_balance", title)):
+            axis_label = "Mass flow balance in-out [%]"
         elif bool(re.search(r"static_pressure", title)):
             axis_label = "Static pressure [Pa]"
         elif bool(re.search(r"temperature", title)):
@@ -55,7 +55,7 @@ class OutFileElaborated:
 
     def generate_dataframe_ax(self, ax=Axes) -> Axes:
         first_column_header = self.dataframe.columns[0]
-        filtered_df = self.dataframe.drop(["Iteration", "Time Step"], axis=1, errors="ignore")
+        filtered_df = self.dataframe.drop(["iteration", "time step"], axis=1, errors="ignore")
         
         reference_df_lenght = int(ceil(len(self.dataframe)/4))
 
@@ -86,6 +86,7 @@ class OutFileElaborated:
             ax.axhline(0, color='black', linestyle = ':' )
             ax.axhline(1, color='red', linestyle = ':' )
             ax.axhline(-1, color='red', linestyle = ':' )
+            ax.set_ylim(bottom=min_number, top=max_number)
         else:             
             try:
                 dataframe_avg = filtered_df.tail(300).mean(axis=None)
