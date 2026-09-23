@@ -116,7 +116,7 @@ class FluentSubcaseSolver:
         self.fluent_run = FluentRun.generate_new_run(self.subcase_params)
         self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, fluent_run=self.fluent_run, subcase_params=self.subcase_params, max_film_time=5, max_transient_time=5)
         self.transcript.print_to_fluent_console(f"Generated run folder {self.fluent_run.name}")
-        self._manage_report_files()
+        # self._manage_report_files()
         self._initialize_subcase()
         self.start_time = datetime.datetime.now() # Start time of the simulation
         self.date_formatting = "%d/%m/%Y %H:%M"
@@ -209,7 +209,7 @@ class FluentSubcaseSolver:
                 "file_name" : report_file_path,
                 "active" : True
             }
-            self.transcript.print_to_fluent_console(f"Modified report file {rp_file_name} path: {report_file_path}")
+            self.transcript.print_to_fluent_console(f"Modified report file {rp_file_name} path: {repr(report_file_path)}")
     
     def _manage_solution_verbosity(self):
         #attivo il verbosity se sto utilizzando lo pseudo_time self.solver
@@ -417,8 +417,7 @@ class FluentSubcaseSolver:
                 logger.info(f"Solving steady-state second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
                 self._manage_convergence_conditions(active=True)
             self._setup_steady_controls(iter=self.subcase_params.second_order_iterations)
-            self.solver.settings.solution.run_calculation.calculate()
-            
+                        
         # TRANSIENT
         else:
             self._manage_convergence_conditions(active=False)
