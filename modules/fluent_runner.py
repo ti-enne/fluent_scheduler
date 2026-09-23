@@ -10,7 +10,7 @@ import textwrap
 from numpy import ceil
 
 from .commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
-from .fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType
+from .fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType, FluentPseudoTimeStepMethod
 from .transcript_elaborator import TranscriptElaboratorRuntime
 from .commission_class import FluentRun
 
@@ -218,18 +218,6 @@ class FluentSubcaseSolver:
         except:
             self.transcript.print_to_fluent_console("Verbosity not active. No info on time-step will be provided")
                 
-    # def _manage_time_step(self):
-    #     #Perchè se leggo il .dat mi viene modificato il time-step in automatico.
-    #     if  self.time_discretization == FluentTimeDiscretization.STEADY:
-    #         return
-    #     try:
-    #         time_step_size = self.solver.settings.solution.run_calculation.transient_controls.time_step_size()
-    #     except:
-    #         time_step_size = None
-    #         logger.info("No time-step size to read. Skipping.")
-        
-    #     return time_step_size
-        
     def _manage_auto_save(self):
         auto_save_dict = {
             'root_name': f'./{self.subcase_params.casesubcase_name}',
@@ -333,6 +321,27 @@ class FluentSubcaseSolver:
         self.transcript.print_to_fluent_console("Modifying residuals convergence criteria.")
         return
 
+    def _setup_steady_controls(self, iter:int):
+        if self.time_discretization != FluentTimeDiscretization.STEADY:
+            return
+        
+        pseudo_time_settings = self.solver.settings.solution.run_calculation.pseudo_time_settings
+        time_step_method = pseudo_time_settings.time_step_method.time_step_method()
+        time_step_method = FluentPseudoTimeStepMethod(time_step_method)
+        if time_step_method == FluentPseudoTimeStepMethod.AUTOMATIC:
+            time_scale_factor = pseudo_time_settings.time_step_method.time_step_size_scale_factor
+            if time_scale_factor() != self.subcase_params.time_step_size:
+                self.transcript.print_to_fluent_console(f"Setting time-step scale factor to {self.subcase_params.time_step_size}")
+                time_scale_factor.set_state(self.subcase_params.time_step_size)
+        elif time_step_method == FluentPseudoTimeStepMethod.USER_SPECIFIED:
+            pseudo_time_step_size = pseudo_time_settings.time_step_method.pseudo_time_step_size
+            if pseudo_time_step_size() != self.subcase_params.time_step_size:
+                self.transcript.print_to_fluent_console(f"Setting pseudo-time-step size to {self.subcase_params.time_step_size}")
+                pseudo_time_step_size.set_state(self.subcase_params.time_step_size)
+        
+        self.solver.settings.solution.run_calculation.iter_count = iter
+        return
+    
     def _setup_transient_controls(self, iterations:int) -> None:
         if self.time_discretization == FluentTimeDiscretization.STEADY:
             return
@@ -372,7 +381,7 @@ class FluentSubcaseSolver:
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
         if self.time_discretization == FluentTimeDiscretization.STEADY:
-            self.solver.settings.solution.run_calculation.iter_count = self.subcase_params.first_order_iterations
+            self._setup_steady_controls(iter=self.subcase_params.first_order_iterations)
             logger.info(f"Solving steady-state first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         else:
             self._manage_convergence_conditions(active=False)
@@ -393,21 +402,23 @@ class FluentSubcaseSolver:
         self.spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW.value
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
+        
         # STEADY
         if self.time_discretization == FluentTimeDiscretization.STEADY:
             second_order_no_convcond_iter = 100
             if second_order_no_convcond_iter < self.subcase_params.second_order_iterations:
                 logger.info(f"Solving steady-state second-order with convergence conditions disabled.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
                 self._manage_convergence_conditions(active=False)
-                self.solver.settings.solution.run_calculation.iter_count = second_order_no_convcond_iter
+                self._setup_steady_controls(iter=second_order_no_convcond_iter)
                 try:
                     self.solver.settings.solution.run_calculation.calculate()
                 except RuntimeError:
                     logger.info(f"Calculation {self.time_discretization.value} has been stopped.")
-                self.subcase_params.second_order_iterations = self.subcase_params.second_order_iterations - second_order_no_convcond_iter
                 logger.info(f"Solving steady-state second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
                 self._manage_convergence_conditions(active=True)
-            self.solver.settings.solution.run_calculation.iter_count = self.subcase_params.second_order_iterations
+            self._setup_steady_controls(iter=self.subcase_params.second_order_iterations)
+            self.solver.settings.solution.run_calculation.calculate()
+            
         # TRANSIENT
         else:
             self._manage_convergence_conditions(active=False)

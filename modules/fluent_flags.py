@@ -5,7 +5,11 @@ class FluentTimeDiscretization(Enum):
     UNSTEADY_1ST = 'unsteady-1st-order'
     UNSTEADY_2ND = 'unsteady-2nd-order'
     UNSTEADY_2ND_BOUNDED = 'unsteady-2nd-order-bounded'
-    
+
+class FluentPseudoTimeStepMethod(Enum):
+    AUTOMATIC = "automatic"
+    USER_SPECIFIED = "user-specified"
+
 class FluentSpatialSchemes(Enum):
     GRAD_GREENGAUSS_NODE = 'green-gauss-node-based'
     GRAD_GREENGAUSS_CELL = 'green-gauss-cell-based'
