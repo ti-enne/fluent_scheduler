@@ -255,7 +255,7 @@ class FluentSubcaseSolver:
     
     def _start_transcript(self):
         # Gestisco il file transcript prodotto
-        transcript_file_path = self.case_params.folder_path / f"{self.subcase_params.casesubcase_name}_log.txt"
+        transcript_file_path = self.fluent_run.path / f"{self.subcase_params.casesubcase_name}_log.txt"
         try:
             if transcript_file_path.exists(): 
                 transcript_file_path.unlink() #Elimino il file nel caso esista, sennò errore.
