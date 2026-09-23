@@ -70,7 +70,7 @@ class CaseParameters(FluentCase):
     def from_dict(cls, parent_commission:CommissionParameters, case_name:str, input_case_dict: dict, default_case_dict: dict) -> "CaseParameters":
         sub_par_dict_name =  "subcases_parameters"
         def_subcase_name = "default_subcase"
-        subcases_parameters : dict = input_case_dict.pop(sub_par_dict_name)
+        subcases_parameters = input_case_dict.pop(sub_par_dict_name)
         default_subcase_parameters : dict = default_case_dict[sub_par_dict_name]
         default_subcase_dict_1 = default_subcase_parameters[def_subcase_name]
         default_subcase_dict_2 = subcases_parameters.pop(def_subcase_name, None)

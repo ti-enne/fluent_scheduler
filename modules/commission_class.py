@@ -149,6 +149,8 @@ class FluentSubcase:
         return f"{self.parent_case.name}_{self.name}"
         
     def _build_name(self) -> str:
+        if self.name != None:
+            return self.name
         name = remove_file_extension(self.dat_path.name)
         name = name.replace(f"{self.parent_case.name}_", "")
         return name
