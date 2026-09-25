@@ -161,7 +161,13 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         
     def print_to_fluent_console(self, msg:str):
         self.solver.scheme.eval(f'(display "!!!FROM PYTHON SCRIPT: {msg}\n")')
-
+    
+    def get_current_iteration_number(self):
+        return self.solver.scheme.eval("(client-inquire-iteration)")
+    
+    def get_current_flow_time(self):
+        return self.rp_vars("flow-time")
+    
     def _setup_save_img(self) -> tuple[Path,list[str]]:
         graphics = self.solver.settings.results.graphics
         contour_list = [item for item in graphics.contour().keys() if "-animation" in item]

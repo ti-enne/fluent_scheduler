@@ -8,6 +8,7 @@ import datetime
 import logging
 import textwrap
 from numpy import ceil
+import json
 
 from .commission_parameters import CommissionParameters, CaseParameters, SubcaseParameters
 from .fluent_flags import FluentTimeDiscretization,FluentSpatialSchemes, FluentTransientDurationMethod, FluentTransientType, FluentPseudoTimeStepMethod
@@ -101,7 +102,6 @@ class FluentSubcaseSolver:
         self.subcase_params = subcase_params
         self.case_params = self.subcase_params.parent_case
         self.commission_params = self.subcase_params.parent_commission
-        # self.to_be_solved = True if any([self.subcase.first_order_solve, self.subcase.second_order_iterations]) else False
     
     def solve_subcase(self):
         if not self.case_params.subcases_to_simulate:
@@ -109,6 +109,7 @@ class FluentSubcaseSolver:
             logger.info(msg)
             return
 
+        self.info_dict = {}
         self.residuals = self.solver.settings.solution.monitor.residual
         logger.info(f"Setting up {self.subcase_params._commissioncasesubcase_name}.")
         self.time_discretization = self._build_time_discretization()
@@ -116,49 +117,15 @@ class FluentSubcaseSolver:
         self.fluent_run = FluentRun.generate_new_run(self.subcase_params)
         self.transcript = TranscriptElaboratorRuntime(solver=self.solver, time_discretization=self.time_discretization, fluent_run=self.fluent_run, subcase_params=self.subcase_params, max_film_time=5, max_transient_time=5)
         self.transcript.print_to_fluent_console(f"Generated run folder {self.fluent_run.name}")
-        # self._manage_report_files()
+        self.info_dict.update({
+            "subcase" : self.subcase_params._commissioncasesubcase_name,
+            "time_discretization" : self.time_discretization.value,
+            "spatial_discretization" : self.spatial_discretization.value,
+            "run_number" : self.fluent_run.index
+        })
         self._initialize_subcase()
         self.start_time = datetime.datetime.now() # Start time of the simulation
         self.date_formatting = "%d/%m/%Y %H:%M"
-        self._subcase_calculation()
-        self._export_to_cfd_post()
-
-    def _manage_convergence_conditions(self, active:bool=True)->None:
-        equations = self.solver.settings.solution.controls.equations
-        if all(item==False for item in equations().values()):
-            active = False
-        self.transcript.print_to_fluent_console(f"Setting convergence conditions to active={active}")
-        convergence_conditions = self.solver.settings.solution.monitor.convergence_conditions.convergence_reports
-        if len(convergence_conditions())==0:
-            return
-        for convergence_condition in convergence_conditions():
-            convergence_conditions[convergence_condition] = {
-                "active" : active,
-                "print" : active
-            }
-
-    def _build_time_discretization(self):
-        fluent_solver_mode = self.solver.settings.setup.general.solver.time() #Time discretization type
-        return FluentTimeDiscretization(fluent_solver_mode)
-    
-    def _build_spatial_discretization(self) -> FluentSpatialSchemes:
-        if self.subcase_params.first_order_solve:
-            spatial_discretization = FluentSpatialSchemes.FIRST_ORDER_UW
-        else:
-            spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW
-        return spatial_discretization
-
-    def _initialize_subcase(self):
-        #Inizializzo o carico il file .dat del subcase
-        if self.subcase_params.initialize:
-            self.solver.settings.solution.initialization.initialization_type = "standard"
-            self.solver.settings.solution.initialization.initialize() #Doppia inizializzazione perchè in caso di UDF nel materiale devo prima inizializzare per computare i defaults.
-            self.solver.tui.solve.initialize.compute_defaults.all_zones()
-            self.solver.settings.solution.initialization.initialize()
-        else:
-            self.solver.settings.file.read(file_type="data", file_name=self.subcase_params.dat_path.absolute())
-
-    def _subcase_calculation(self):
         self.transcript.define_image_callbacks()
         self._manage_named_expressions()
         self._manage_report_files()
@@ -180,6 +147,49 @@ class FluentSubcaseSolver:
         self.solver.settings.file.write(file_type="case", file_name=self.case_params.cas_file_path)
         logger.info(f"End of simulation:\nStarted at: {self.start_time.strftime(self.date_formatting)}\nFinished at: {self.end_time.strftime(self.date_formatting)}\nSimulation duration: {self.simulation_time}")
         self._post_simulation_subcase()
+        self._export_to_cfd_post()
+
+    def _manage_convergence_conditions(self, active:bool=True)->None:
+        equations = self.solver.settings.solution.controls.equations
+        if all(item==False for item in equations().values()):
+            active = False
+        self.transcript.print_to_fluent_console(f"Setting convergence conditions to active={active}")
+        convergence_conditions = self.solver.settings.solution.monitor.convergence_conditions.convergence_reports
+        if len(convergence_conditions())==0:
+            return
+        for convergence_condition in convergence_conditions():
+            convergence_conditions[convergence_condition] = {
+                "active" : active,
+                "print" : active
+            }
+
+    def _save_infos(self):
+        info_dict = {
+            "simulation_type" : self.time_discretization.value,
+            
+        }
+        
+    
+    def _build_time_discretization(self):
+        fluent_solver_mode = self.solver.settings.setup.general.solver.time() #Time discretization type
+        return FluentTimeDiscretization(fluent_solver_mode)
+    
+    def _build_spatial_discretization(self) -> FluentSpatialSchemes:
+        if self.subcase_params.first_order_solve:
+            spatial_discretization = FluentSpatialSchemes.FIRST_ORDER_UW
+        else:
+            spatial_discretization = FluentSpatialSchemes.SECOND_ORDER_UW
+        return spatial_discretization
+
+    def _initialize_subcase(self):
+        #Inizializzo o carico il file .dat del subcase
+        if self.subcase_params.initialize:
+            self.solver.settings.solution.initialization.initialization_type = "standard"
+            self.solver.settings.solution.initialization.initialize() #Doppia inizializzazione perchè in caso di UDF nel materiale devo prima inizializzare per computare i defaults.
+            self.solver.tui.solve.initialize.compute_defaults.all_zones()
+            self.solver.settings.solution.initialization.initialize()
+        else:
+            self.solver.settings.file.read(file_type="data", file_name=self.subcase_params.dat_path.absolute())
 
     def _write_fluent_settings(self):
         save_path = self.fluent_run.path / f"{self.subcase_params.casesubcase_name}.flsettings"
@@ -193,7 +203,8 @@ class FluentSubcaseSolver:
             named_expr = self.solver.settings.setup.named_expressions[equation_name]
             named_expr.definition = equation_definition
             self.transcript.print_to_fluent_console(f"Modified named expression {equation_name}\nDefinition: {equation_definition}.\nValue from expression evaluation: {named_expr.get_value()}")
-    
+        self.info_dict["Named expressions"] = equations_dict
+        
     def _manage_report_files(self):
         if self.subcase_params.post_process == False:
             return
@@ -318,6 +329,7 @@ class FluentSubcaseSolver:
                         "relative_criteria" : value[1],
                     }
         
+        self.info_dict["residuals"] = {key:{key2:value2 for key2,value2 in value.items() if "criteria" in key2} for key,value in residuals.equations().items()}
         self.transcript.print_to_fluent_console("Modifying residuals convergence criteria.")
         return
 
@@ -333,11 +345,13 @@ class FluentSubcaseSolver:
             if time_scale_factor() != self.subcase_params.time_step_size:
                 self.transcript.print_to_fluent_console(f"Setting time-step scale factor to {self.subcase_params.time_step_size}")
                 time_scale_factor.set_state(self.subcase_params.time_step_size)
+                self.info_dict["time_step_scale_factor"] = self.subcase_params.time_step_size
         elif time_step_method == FluentPseudoTimeStepMethod.USER_SPECIFIED:
             pseudo_time_step_size = pseudo_time_settings.time_step_method.pseudo_time_step_size
             if pseudo_time_step_size() != self.subcase_params.time_step_size:
                 self.transcript.print_to_fluent_console(f"Setting pseudo-time-step size to {self.subcase_params.time_step_size}")
                 pseudo_time_step_size.set_state(self.subcase_params.time_step_size)
+                self.info_dict["pseudo_time_step_size"] = self.subcase_params.time_step_size
         
         self.solver.settings.solution.run_calculation.iter_count = iter
         return
@@ -349,26 +363,36 @@ class FluentSubcaseSolver:
         transient_type = self.solver.settings.solution.run_calculation.transient_controls.type()
         transient_type = FluentTransientType(transient_type)
         transient_controls = self.solver.settings.solution.run_calculation.transient_controls
+        self.info_dict["transient_type"] = transient_type.value
         if transient_type == FluentTransientType.FIXED:
             self.transcript.print_to_fluent_console(f'Solving for {iterations} time steps')
             transient_controls.time_step_size = self.subcase_params.time_step_size
             transient_controls.time_step_count = iterations
+            self.info_dict.update({
+                "time_step_size" : self.subcase_params.time_step_size,
+                "time_step_count" : iterations
+            })
             return
         
         duration_specification = self.solver.settings.solution.run_calculation.transient_controls.duration_specification_method()
         duration_specification = FluentTransientDurationMethod(duration_specification)
+        
         if duration_specification == FluentTransientDurationMethod.TOTAL_TIME:
             self.transcript.print_to_fluent_console(f'Setting total time to: {iterations}s')
             transient_controls.total_time = iterations
+            self.info_dict["total_time"] = iterations
         elif duration_specification == FluentTransientDurationMethod.TOTAL_TIME_STEPS:
             self.transcript.print_to_fluent_console(f'Setting total time steps: {iterations}s')
             transient_controls.total_time_step_count = iterations
+            self.info_dict["total_time_step_count"] = iterations
         elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME:
             self.transcript.print_to_fluent_console(f'Solving for {iterations}s')
             transient_controls.incremental_time = iterations
+            self.info_dict["incremental_time"] = iterations
         elif duration_specification == FluentTransientDurationMethod.INCREMENTAL_TIME_STEPS:
             self.transcript.print_to_fluent_console(f'Solving for {iterations} time steps')
             transient_controls.time_step_count = iterations
+            self.info_dict["incremental_time_step"] = iterations
         else:
             logger.error("Duration specification type not found.")
         return
@@ -381,9 +405,11 @@ class FluentSubcaseSolver:
         discretization_schemes["mom"] = self.spatial_discretization
         self._manage_residuals()
         if self.time_discretization == FluentTimeDiscretization.STEADY:
+            start_at = f"iter: {self.transcript.get_current_iteration_number()}"
             self._setup_steady_controls(iter=self.subcase_params.first_order_iterations)
             logger.info(f"Solving steady-state first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
         else:
+            start_at = f"time-step: {self.transcript.get_current_flow_time()}"
             self._manage_convergence_conditions(active=False)
             self._setup_transient_controls(self.subcase_params.first_order_iterations)                
             logger.info(f"Solving transient first-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
@@ -394,6 +420,8 @@ class FluentSubcaseSolver:
         logger.info(f"Finished {self.time_discretization.value} first-order simulation")
         dat_file_path = self.case_params.folder_path / f"{self.subcase_params.casesubcase_name}_1storder.dat.h5"
         self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
+        end_at =  self.transcript.get_current_iteration_number()
+        self.info_dict["first_order_solve"] = f"Started at {start_at} , ended at: {end_at}, converged: {self.solver.rp_vars("solution/converged?")}"
         
     def _solve_second_order(self):
         if not self.subcase_params.second_order_solve:
@@ -406,6 +434,7 @@ class FluentSubcaseSolver:
         # STEADY
         if self.time_discretization == FluentTimeDiscretization.STEADY:
             second_order_no_convcond_iter = 100
+            start_at = f"iter: {self.transcript.get_current_iteration_number()}"
             if second_order_no_convcond_iter < self.subcase_params.second_order_iterations:
                 logger.info(f"Solving steady-state second-order with convergence conditions disabled.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
                 self._manage_convergence_conditions(active=False)
@@ -420,6 +449,7 @@ class FluentSubcaseSolver:
                         
         # TRANSIENT
         else:
+            start_at = f"time-step: {self.transcript.get_current_flow_time()}"
             self._manage_convergence_conditions(active=False)
             self._setup_transient_controls(self.subcase_params.second_order_iterations)                
             logger.info(f"Solving transient second-order simulation.\nStarted at: {self.start_time.strftime(self.date_formatting)}")
@@ -431,6 +461,8 @@ class FluentSubcaseSolver:
         logger.info(f"Finished {self.time_discretization.value} second-order simulation")
         dat_file_path = self.case_params.folder_path / f"{self.subcase_params.casesubcase_name}.dat.h5"
         self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
+        end_at =  self.transcript.get_current_iteration_number()
+        self.info_dict["second_order_solve"] = f"Started at {start_at} , ended at: {end_at}, converged: {self.solver.rp_vars("solution/converged?")}"
 
     def _solve_UDS_equations(self, iter:int=200):
         if len(self._uds_equations)==0:
@@ -469,12 +501,17 @@ class FluentSubcaseSolver:
         self.transcript.export_to_csv()
         self.fluent_run.elaborate_out_log_files()
         self.fluent_run.generate_plot_imgs()
+        
+        info_dict_save_path = self.fluent_run.path / "simulation_info.json"
+        with open(info_dict_save_path, "w") as f:
+            json.dump(self.info_dict, f, indent=4)
+        
         try:
             with open(log_file_path, "a") as f:
                 f.write(f"{self.fluent_run.name}\t{self.end_time}\t{self.subcase_params.casesubcase_name}\tdurata simulazione: {self.simulation_time}\tnumero di core: {self.fluent_solver.cores}\n")
             
             with open(all_simulations_log_file, "a") as f:
-                f.write(f"{self.end_time}\t{self.commission_params.name}\t{self.subcase_params.casesubcase_name}\tdurata simulazione: {self.simulation_time}\tnumero di core: {self.fluent_solver.cores}\n")
+                f.write(f"{self.end_time}\t{self.subcase_params._commissioncasesubcase_name}\tdurata simulazione: {self.simulation_time}\tnumero di core: {self.fluent_solver.cores}\n")
         except Exception as e:
             logger.error(f"Log file could not be written or the subcase was not simulated. Error {e}")
         logger.info("Postprocessing finished.")
