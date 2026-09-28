@@ -10,6 +10,11 @@ import textwrap
 logger = logging.getLogger("commission_parameters")
 
 class CommissionParameters(FluentCommission):
+    missing_files : list[Path]
+    case_parameters_dict : dict[str,"CaseParameters"]
+    cases_to_simulate_list : list["CaseParameters"]
+    json_path : Path
+    
     def __init__(self, name:str, root_path:Path):
         super().__init__(name, root_path)
         self.missing_files = []
@@ -99,6 +104,13 @@ class CaseParameters(FluentCase):
     def update_missing_files(self):
         if not self.cas_file_path.exists():
             self.parent_commission.missing_files.append(self.cas_file_path)
+            
+    def to_dict(self) -> dict:
+        returned_dict = {
+            "data_file_quantities_list" : self.data_file_quantities_list,
+            "equations_syntax_dict":self.equations_syntax_dict,
+        }
+        return returned_dict
     
 @dataclass
 class SubcaseParameters(FluentSubcase):
@@ -177,6 +189,22 @@ class SubcaseParameters(FluentSubcase):
         for equation_name, equation in equations_syntax_dict.items():
             equations_dict[equation_name] = equation.format(**variables_dict)
         return equations_dict
+    
+    def to_dict(self) -> dict:
+        returned_dict = {
+            "equations_dict":self.equations_dict,
+            "initialize":self.initialize,
+            "dat_path" : str(self.dat_path),
+            "time_step_size" : self.time_step_size,
+            "first_order_solve" : self.first_order_solve,
+            "first_order_iterations" : self.first_order_iterations,
+            "second_order_solve" : self.second_order_solve,
+            "second_order_iterations" : self.second_order_iterations,
+            "post_process" : self.post_process,
+            "export_to_cfd_post" : self.export_to_cfd_post,
+        }
+        return returned_dict
+
 
 if __name__ == "__main__":
     commission_name = "SVILSIM_capsula_nespresso"

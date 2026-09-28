@@ -120,7 +120,6 @@ class FluentSubcaseSolver:
         self.info_dict.update({
             "subcase" : self.subcase_params._commissioncasesubcase_name,
             "time_discretization" : self.time_discretization.value,
-            "spatial_discretization" : self.spatial_discretization.value,
             "run_number" : self.fluent_run.index
         })
         self._initialize_subcase()
@@ -139,7 +138,6 @@ class FluentSubcaseSolver:
         self._solve_first_order()
         self._solve_second_order()
         self._solve_UDS_equations()
-        self.solver.settings.parallel.timer.usage()
         self.solver.settings.file.stop_transcript()
         self._write_fluent_settings()
         self.end_time = datetime.datetime.now()       
@@ -203,7 +201,7 @@ class FluentSubcaseSolver:
             named_expr = self.solver.settings.setup.named_expressions[equation_name]
             named_expr.definition = equation_definition
             self.transcript.print_to_fluent_console(f"Modified named expression {equation_name}\nDefinition: {equation_definition}.\nValue from expression evaluation: {named_expr.get_value()}")
-        self.info_dict["Named expressions"] = equations_dict
+        self.info_dict["named_expressions"] = equations_dict
         
     def _manage_report_files(self):
         if self.subcase_params.post_process == False:
@@ -421,6 +419,7 @@ class FluentSubcaseSolver:
         dat_file_path = self.case_params.folder_path / f"{self.subcase_params.casesubcase_name}_1storder.dat.h5"
         self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
         end_at =  self.transcript.get_current_iteration_number()
+        self.info_dict["spatial_discretization"] = self.spatial_discretization
         self.info_dict["first_order_solve"] = f"Started at {start_at} , ended at: {end_at}, converged: {self.solver.rp_vars("solution/converged?")}"
         
     def _solve_second_order(self):
@@ -462,6 +461,7 @@ class FluentSubcaseSolver:
         dat_file_path = self.case_params.folder_path / f"{self.subcase_params.casesubcase_name}.dat.h5"
         self.solver.settings.file.write(file_type="data", file_name=dat_file_path.absolute()) #salvo il .dat
         end_at =  self.transcript.get_current_iteration_number()
+        self.info_dict["spatial_discretization"] = " and ".join((self.info_dict.get("spatial_discretization",""), self.spatial_discretization))
         self.info_dict["second_order_solve"] = f"Started at {start_at} , ended at: {end_at}, converged: {self.solver.rp_vars("solution/converged?")}"
 
     def _solve_UDS_equations(self, iter:int=200):
@@ -502,6 +502,11 @@ class FluentSubcaseSolver:
         self.fluent_run.elaborate_out_log_files()
         self.fluent_run.generate_plot_imgs()
         
+        self.info_dict.update({
+            "case_parameters" : self.case_params.to_dict(),
+            "subcase_parameters" : self.subcase_params.to_dict(),
+            "parallel_time_usage" : self.transcript.parallel_time_usage
+        })
         info_dict_save_path = self.fluent_run.path / "simulation_info.json"
         with open(info_dict_save_path, "w") as f:
             json.dump(self.info_dict, f, indent=4)

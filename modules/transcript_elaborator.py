@@ -12,6 +12,8 @@ class TranscriptElaborator:
     column_values : list[dict[str,float]]
     _column_names : list[str]
     _pending_line : dict[str,float]
+    _write_time_usage : bool
+    parallel_time_usage : list[str]
     fluent_run: FluentRun
     df: pd.DataFrame
     
@@ -19,6 +21,8 @@ class TranscriptElaborator:
         self._pending_line = {}
         self.column_values = []
         self._column_names = []
+        self._write_time_usage = False
+        self.parallel_time_usage = []
         self.fluent_run = fluent_run
         self.df = pd.DataFrame()
     
@@ -91,6 +95,19 @@ class TranscriptElaborator:
         }
         self.add_to_pending(results_dict)
         return results_dict["film_time"]
+    
+    def _get_time_usage(self, msg:str):
+        if msg.startswith("Simulation wall-clock"):
+            if self._write_time_usage==False:
+                self.parallel_time_usage = [msg]
+                self._write_time_usage = True
+            else:
+                self.parallel_time_usage.append(msg)
+                self._write_time_usage = False
+            return
+        
+        if self._write_time_usage:
+            self.parallel_time_usage.append(msg)
     
     def update_df(self) -> pd.DataFrame:
         # self.column_values.append(self._pending_line)
@@ -166,7 +183,7 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         return self.solver.scheme.eval("(client-inquire-iteration)")
     
     def get_current_flow_time(self):
-        return self.rp_vars("flow-time")
+        return self.solver.rp_vars("flow-time")
     
     def _setup_save_img(self) -> tuple[Path,list[str]]:
         graphics = self.solver.settings.results.graphics
