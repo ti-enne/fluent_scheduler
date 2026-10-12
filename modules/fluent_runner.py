@@ -138,6 +138,7 @@ class FluentSubcaseSolver:
         self._solve_first_order()
         self._solve_second_order()
         self._solve_UDS_equations()
+        self.solver.settings.parallel.timer.usage()
         self.solver.settings.file.stop_transcript()
         self._write_fluent_settings()
         self.end_time = datetime.datetime.now()       
@@ -161,13 +162,6 @@ class FluentSubcaseSolver:
                 "print" : active
             }
 
-    def _save_infos(self):
-        info_dict = {
-            "simulation_type" : self.time_discretization.value,
-            
-        }
-        
-    
     def _build_time_discretization(self):
         fluent_solver_mode = self.solver.settings.setup.general.solver.time() #Time discretization type
         return FluentTimeDiscretization(fluent_solver_mode)
@@ -505,7 +499,7 @@ class FluentSubcaseSolver:
         self.info_dict.update({
             "case_parameters" : self.case_params.to_dict(),
             "subcase_parameters" : self.subcase_params.to_dict(),
-            "parallel_time_usage" : self.transcript.parallel_time_usage
+            # "parallel_time_usage" : self.transcript.parallel_time_usage,
         })
         info_dict_save_path = self.fluent_run.path / "simulation_info.json"
         with open(info_dict_save_path, "w") as f:

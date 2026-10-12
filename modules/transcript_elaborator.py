@@ -33,6 +33,7 @@ class TranscriptElaborator:
         self._get_pseudo_dt_info(msg)
         self._get_film_values(msg)
         self._get_column_values(msg)
+        self._get_time_usage(msg)
         
     @staticmethod
     def _extract_number(string:str, lookbehind_regex:str=None)->float:
@@ -97,17 +98,22 @@ class TranscriptElaborator:
         return results_dict["film_time"]
     
     def _get_time_usage(self, msg:str):
+        if msg.startswith("Performance Time for"):
+            self.parallel_time_usage = [msg]
+            self._write_time_usage = True
+            print(msg)
+            return
+        
         if msg.startswith("Simulation wall-clock"):
-            if self._write_time_usage==False:
-                self.parallel_time_usage = [msg]
-                self._write_time_usage = True
-            else:
-                self.parallel_time_usage.append(msg)
-                self._write_time_usage = False
+            self.parallel_time_usage.append(msg)
+            self._write_time_usage = False
+            print(msg)
             return
         
         if self._write_time_usage:
             self.parallel_time_usage.append(msg)
+            print(msg)
+
     
     def update_df(self) -> pd.DataFrame:
         # self.column_values.append(self._pending_line)
@@ -216,11 +222,11 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         def on_iteration_end(session, event_info:pyfluent.IterationEndedEventInfo):
             if event_info.index % self.subcase_params.save_img_every !=0:
                 return
+            self.print_to_fluent_console(f'Saving images for contours: {", ".join(contour_list)}\nIteration: {event_info.index}\nPath: {base_save_path}')
             for contour_name in contour_list:
-                self.print_to_fluent_console(f'Saving images for contour {contour_name}, iteration: {event_info.index}')
                 graphics.contour[contour_name].display()
                 for view_name in self.subcase_params.view_list:
-                    save_path = base_save_path / f"{self.subcase_params.casesubcase_name}_{contour_name}_{view_name}_iter{event_info.index}"
+                    save_path = base_save_path / f"{view_name}_iter{event_info.index}"
                     graphics.views.restore_view(view_name=view_name)
                     graphics.views.auto_scale()
                     graphics.picture.save_picture(file_name=save_path.absolute())
@@ -241,13 +247,12 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
                 # self.print_to_fluent_console(f'Flow time is {self.total_time} and next save time is {self._next_image_time}, skipping')
                 return
             
+            self.print_to_fluent_console(f'Saving images for contours {", ".join(contour_list)}\nTime: {self.total_time}\nPath: {base_save_path}')
             for contour_name in contour_list:
-                self.print_to_fluent_console(f'Saving images for contour {contour_name}, time: {self.total_time}')
                 graphics.contour[contour_name].display()
                 for view_name in self.subcase_params.view_list:
                     total_time_str = f"{self.total_time:.2e}".replace(".","d")
-                    contour_name_edited = contour_name.replace("-animation","") #some names could be too long to be saved.
-                    save_path = base_save_path / f"{self.subcase_params.casesubcase_name}_{contour_name_edited}_{view_name}_time{total_time_str}s"
+                    save_path = base_save_path / f"{view_name}_time{total_time_str}s"
                     graphics.views.restore_view(view_name=view_name)
                     graphics.views.auto_scale()
                     graphics.picture.save_picture(file_name=save_path.absolute())

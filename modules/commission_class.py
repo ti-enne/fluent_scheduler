@@ -177,7 +177,7 @@ class FluentRun:
         self.parent_commission = self.parent_case.parent_commission
         self.index = self._build_run_number()
         self.name = self._build_run_name()
-        self.elaborate_out_log_files()
+        # self.elaborate_out_log_files()
     
     @cached_property
     def _commissioncasesubcase_name(self):
