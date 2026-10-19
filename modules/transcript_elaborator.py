@@ -181,7 +181,17 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
         self.max_transient_time = max_transient_time
         self.max_film_time = max_film_time
         self.subcase_params = subcase_params
+    
+    def add_to_pending(self, item:dict[str,float]):
+        if "film_time" not in item.keys() and bool(self._pending_line.keys() & item.keys()):
+            self.column_values.append(self._pending_line)
+            self._pending_line = {}
         
+        if "iter" not in self._pending_line.keys():
+            self._pending_line["iter"] = self.get_current_iteration_number()
+
+        self._pending_line.update(item)
+    
     def print_to_fluent_console(self, msg:str):
         self.solver.scheme.eval(f'(display "!!!FROM PYTHON SCRIPT: {msg}\n")')
     
@@ -226,7 +236,9 @@ class TranscriptElaboratorRuntime(TranscriptElaborator):
             for contour_name in contour_list:
                 graphics.contour[contour_name].display()
                 for view_name in self.subcase_params.view_list:
-                    save_path = base_save_path / f"{view_name}_iter{event_info.index}"
+                    img_name = f"{contour_name}_{view_name}_iter{event_info.index}".replace("-animation","")
+                    save_path = base_save_path / img_name
+                    self.print_to_fluent_console(img_name)
                     graphics.views.restore_view(view_name=view_name)
                     graphics.views.auto_scale()
                     graphics.picture.save_picture(file_name=save_path.absolute())
