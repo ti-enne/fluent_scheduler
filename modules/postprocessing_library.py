@@ -168,7 +168,8 @@ class LogFileElaborated:
             plot_args = {
                 "x" : "iter"
             }
-            
+        
+        if "Iterations" not in df.columns: return
         df.plot(title=df_name, grid=True, xlabel = "Iterations", logy=True, ax=ax, **plot_args)
         ax.legend(bbox_to_anchor = (1.04, 1))
         return ax                
