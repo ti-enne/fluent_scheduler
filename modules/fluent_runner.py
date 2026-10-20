@@ -231,6 +231,8 @@ class FluentSubcaseSolver:
             every_n_iter = ceil(max([self.subcase_params.first_order_iterations, self.subcase_params.second_order_iterations])/3)
             if every_n_iter < 100:
                 every_n_iter = 100
+            elif every_n_iter > 5000:
+                every_n_iter = 5000
             #attivo l'autosave visto che Fluent ha la tendenza di crashare.
             steady_autosave_dict = {
                 "data_frequency" : every_n_iter, #ogni quante iter/Time step salvare
