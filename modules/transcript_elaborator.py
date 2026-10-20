@@ -118,6 +118,10 @@ class TranscriptElaborator:
     def update_df(self) -> pd.DataFrame:
         # self.column_values.append(self._pending_line)
         self.df = pd.DataFrame(self.column_values+[self._pending_line])
+        if "iter" in self.df.columns:
+            return
+        out_file_name, out_file = next(iter(self.fluent_run.out_files_dict.items()))
+        self.df["iter"] = out_file.dataframe["iteration"]
     
     def export_to_csv(self):
         self.update_df()
