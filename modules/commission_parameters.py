@@ -42,7 +42,7 @@ class CommissionParameters(FluentCommission):
     
     def __str__(self) -> str:
         msg = ""
-        if len(self.cases_to_simulate_list)>0:
+        if len(self.case_parameters_dict)>0 and len(self.cases_to_simulate_list)>0:
             msg = f"Commission {self.name}:\n{"\n".join(["\t"+str(case).replace("\n", "\n\t") for case in self.cases_to_simulate_list])}"
         return msg
     
@@ -66,9 +66,9 @@ class CaseParameters(FluentCase):
     def __str__(self) -> str:
         msg = f"Case {self.name}:\n"
         if self.subcases_to_initialize:
-            msg = msg + f"\tINITIALIZING: {" ,".join([subcase.name for subcase in self.subcases_to_initialize])}\n"
+            msg = msg + f"\tINITIALIZING: {", ".join([subcase.name for subcase in self.subcases_to_initialize])}\n"
         if self.subcases_to_simulate_only:
-            msg = msg + f"\tSIMULATING ONLY: {" ,".join([subcase.name for subcase in self.subcases_to_simulate_only])}\n"
+            msg = msg + f"\tSIMULATING ONLY: {", ".join([subcase.name for subcase in self.subcases_to_simulate_only])}\n"
         return msg    #Skippo il case nel caso non siano presenti subcase da simulare. E' una funzione da chiamare dopo perchè sennò il costruttore mi da errore.
     
     @classmethod
