@@ -3,6 +3,7 @@ from pathlib import Path
 from ansys.fluent.core.session_solver import Solver
 import ansys.fluent.core as pyfluent
 import pandas as pd
+from functools import cached_property
 
 from .commission_parameters import SubcaseParameters
 from .commission_class import FluentRun
@@ -16,6 +17,7 @@ class TranscriptElaborator:
     parallel_time_usage : list[str]
     fluent_run: FluentRun
     df: pd.DataFrame
+    composed_df : pd.DataFrame
     
     def __init__(self, fluent_run:FluentRun) -> None:
         self._pending_line = {}
@@ -25,7 +27,17 @@ class TranscriptElaborator:
         self.parallel_time_usage = []
         self.fluent_run = fluent_run
         self.df = pd.DataFrame()
+        # self.composed_df = pd.DataFrame()
     
+    @cached_property
+    def composed_df(self) -> pd.DataFrame:
+        composed_df =  self.fluent_run.path.glob("composed_df*.csv")
+        if not composed_df:
+            composed_df, _ = self._compose_df()
+        else:
+            composed_df = pd.read_csv(next(composed_df))
+        return composed_df
+        
     def elaborate_msg(self, msg:str):
         msg = msg.strip()
         self._get_column_titles(msg)
@@ -128,7 +140,7 @@ class TranscriptElaborator:
         save_path = self.fluent_run.path / f"{self.fluent_run.parent_subcase.casesubcase_name}_transcript_df.csv"
         self.df.to_csv(save_path, index=False)
         
-    def compose_df(self) -> tuple[pd.DataFrame, list[int]]:
+    def _compose_df(self) -> tuple[pd.DataFrame, list[int]]:
         qty_name, fluent_run = next(iter(self.fluent_run.out_files_dict.items()), None)
         df = fluent_run.dataframe
         if df.empty:
@@ -155,7 +167,9 @@ class TranscriptElaborator:
             from_runs.append(run.index)
             if first_iter <=1:
                 break
-            
+        
+        save_path = self.fluent_run.path / f"composed_df_runs{"-".join([str(i) for i in from_runs])}.csv"
+        composed_df.to_csv(save_path, index=False)
         return composed_df, from_runs
     
     @classmethod
