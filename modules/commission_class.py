@@ -177,7 +177,7 @@ class FluentRun:
         self.parent_commission = self.parent_case.parent_commission
         self.index = self._build_run_number()
         self.name = self._build_run_name()
-        self.elaborate_out_log_files()
+        # self.elaborate_out_log_files()
     
     @cached_property
     def _commissioncasesubcase_name(self):
@@ -255,9 +255,17 @@ class FluentRun:
     #         logger.error(f"No run folders for {self._commissioncasesubcase_name}")
     #         return
     
-    def elaborate_out_log_files(self):
-        self.out_files_dict = self._build_out_files_dict(research_path=self.path)
-        self.log_file = self._build_log_file(research_path=self.path)
+    # def elaborate_out_log_files(self):
+    #     self.out_files_dict = self._build_out_files_dict(research_path=self.path)
+    #     self.log_file = self._build_log_file(research_path=self.path)
+        
+    @cached_property
+    def out_files_dict(self) -> dict[str,OutFileElaborated]:
+        return self._build_out_files_dict(research_path=self.path)
+    
+    @cached_property
+    def log_file(self) -> LogFileElaborated:
+        return self._build_log_file(research_path=self.path)
     
     def _build_out_files_dict(self, research_path:Path=None) -> dict[str,OutFileElaborated]:
         out_files_dict = self._file_list_generator(research_path=research_path, file_extension_list=[".out"])
