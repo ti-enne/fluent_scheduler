@@ -104,7 +104,6 @@ class LogFileElaborated:
     parent_subcase_name:str
     dataframes_dict: dict[str,pd.DataFrame]
     
-    
     def __init__(self, path:Path):
         self.path = path
         self.parent_subcase_name = self.path.parent.name
@@ -131,7 +130,7 @@ class LogFileElaborated:
         df = df.apply(pd.to_numeric, errors="coerce") #trasformo i dati in numerici perchè inizialmente vengono letti come stringhe
         df.reset_index(drop=True, inplace=True)
         df = df.interpolate(method="linear", limit_direction="both") #interpolo per fillare i dati nel caso in cui non siano presenti (specialmente nel caso in cui printi le convergence conditions)
-        self.dataframes_dict["Residuals"] = df
+        self.dataframes_dict["residuals"] = df
         return df
 
     def _build_pseudo_dt_dataframe(self, file_lines:list[str]) -> pd.DataFrame|None:
@@ -139,8 +138,8 @@ class LogFileElaborated:
         if not pseudo_dt_lines:
             logger.debug(f"No info about pseudo-dt available for {self.parent_subcase_name}. Corresponding dataframe will not be created.")
             return None
-        pseudo_dt_df = pd.DataFrame(pseudo_dt_lines, columns=["Pseudo time-step [s]"])
-        self.dataframes_dict["Pseudo_dt"] = pseudo_dt_df
+        pseudo_dt_df = pd.DataFrame(pseudo_dt_lines, columns=["pseudo time-step [s]"])
+        self.dataframes_dict["pseudo_dt"] = pseudo_dt_df
         
         return pseudo_dt_df
         
@@ -158,7 +157,7 @@ class LogFileElaborated:
             radiosity_iterations_list.append(int(re.search(r"(?<=^Radiosity.*)\d+",item, re.MULTILINE).group()))
             radiosity_residuals_list.append(float(re.search(r"(?<=Final radiosity.*)\d+(.\d+e(\+|\-)\d+)",item, re.MULTILINE).group()))
         radiosity_df = pd.DataFrame(list(zip(iteration_number_list,radiosity_iterations_list,radiosity_residuals_list)), columns=["iter", "rad_iter", "rad_residuals"])
-        self.dataframes_dict["Radiosity"] = radiosity_df
+        self.dataframes_dict["radiosity"] = radiosity_df
         return radiosity_df
         
     def df_to_ax(self, df_name:str, ax:Axes)->Axes:
@@ -169,7 +168,7 @@ class LogFileElaborated:
                 "x" : "iter"
             }
         
-        if "Iterations" not in df.columns: return
-        df.plot(title=df_name, grid=True, xlabel = "Iterations", logy=True, ax=ax, **plot_args)
+        # if "iterations" not in df.columns: return
+        df.plot(title=df_name, grid=True, xlabel = "iterations", logy=True, ax=ax, **plot_args)
         ax.legend(bbox_to_anchor = (1.04, 1))
         return ax                

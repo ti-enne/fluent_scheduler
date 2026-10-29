@@ -495,7 +495,7 @@ class FluentSubcaseSolver:
                 pass            
         
         self.transcript.export_to_csv()
-        self.fluent_run.elaborate_out_log_files()
+        # self.fluent_run.elaborate_out_log_files()
         self.fluent_run.generate_plot_imgs()
         
         self.info_dict.update({
